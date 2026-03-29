@@ -15,17 +15,40 @@ GET  /api/config          – current strategy parameters (read-only)
 
 from __future__ import annotations
 
+import os
 import threading
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
 import config
 import database as db
 from bot import TradingBot
 
+_FRONTEND_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
+
 app = Flask(__name__)
 CORS(app)
+
+
+# ── Frontend ──────────────────────────────────────────────────────────────────
+
+_STATIC_EXTENSIONS = {".css", ".js", ".html", ".ico", ".png", ".svg", ".woff", ".woff2"}
+
+
+@app.get("/")
+def index():
+    return send_from_directory(_FRONTEND_DIR, "index.html")
+
+
+@app.get("/<path:filename>")
+def static_files(filename):
+    _, ext = os.path.splitext(filename)
+    if ext.lower() not in _STATIC_EXTENSIONS:
+        from flask import abort
+        abort(404)
+    return send_from_directory(_FRONTEND_DIR, filename)
+
 
 # Single bot instance (starts stopped)
 _bot: TradingBot | None = None
