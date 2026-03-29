@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 
 import config
 from strategy import (
+    ADX_MIN,
     Signal,
     _last_signal_bar,
     SIGNAL_COOLDOWN,
@@ -51,6 +52,47 @@ def make_ohlcv(n: int = 600, trend: str = "up") -> pd.DataFrame:
             "open":   [p * 0.999 for p in prices],
             "high":   [p * 1.005 for p in prices],
             "low":    [p * 0.995 for p in prices],
+            "close":  prices,
+            "volume": [np.random.uniform(300, 900) for _ in prices],
+        }
+    )
+    df.index = pd.date_range("2024-01-01", periods=n, freq="15min", tz="UTC")
+    return df
+
+
+def make_short_trigger_ohlcv(n: int = 700) -> pd.DataFrame:
+    """
+    Generate a downtrend dataset specifically designed to trigger SHORT signals.
+
+    The SHORT entry requires ADX≥22, price < EMA-200, ema_slow < ema_trend,
+    RSI spiked ≥58 within the last 4 bars, and RSI now ≤48.  Achieving this
+    with purely random data is not reliable, so we use a deterministic pattern:
+    a persistent downtrend interrupted every 40 bars by a very sharp 2-bar
+    counter-rally (pushing RSI well above 58) followed by an immediate
+    2-bar rejection (pulling RSI back below 48).  This V-shape within 4 bars
+    exactly matches the strategy's lookback requirement.
+    """
+    np.random.seed(77)
+    prices = [80000.0]   # start high so we have room to fall
+    for i in range(n - 1):
+        phase = i % 40
+        if phase == 20:      # bar 1 of sharp counter-rally
+            step = 600
+        elif phase == 21:    # bar 2 of counter-rally
+            step = 400
+        elif phase == 22:    # bar 1 of rejection
+            step = -700
+        elif phase == 23:    # bar 2 of rejection
+            step = -500
+        else:                # normal downtrend bar
+            step = np.random.normal(-200, 80)
+        prices.append(max(100, prices[-1] + step))
+
+    df = pd.DataFrame(
+        {
+            "open":   [p * 0.999 for p in prices],
+            "high":   [p * 1.006 for p in prices],
+            "low":    [p * 0.994 for p in prices],
             "close":  prices,
             "volume": [np.random.uniform(300, 900) for _ in prices],
         }
@@ -117,6 +159,10 @@ class TestGenerateSignal:
         # Not enough bars for the 220-bar minimum
         assert generate_signal(df) == Signal.NONE
 
+    def test_adx_min_is_positive(self):
+        """ADX_MIN is exported from the strategy module and is a positive number."""
+        assert ADX_MIN > 0
+
     def test_long_signal_on_uptrend(self):
         """
         An uptrend with periodic pullbacks (RSI dips below 42) should
@@ -130,10 +176,14 @@ class TestGenerateSignal:
 
     def test_short_signal_on_downtrend(self):
         """
-        A downtrend with periodic RSI spikes above 58 should produce SHORT signals.
+        A downtrend with sharp V-shaped RSI spikes should produce SHORT signals.
+
+        The SHORT entry requires: ADX≥22, macro downtrend, RSI spiked ≥58
+        within the last 4 bars, and RSI now ≤48.  The dedicated fixture
+        makes these V-shape RSI moves deterministically.
         """
         reset_signal_state()
-        df = make_ohlcv(600, trend="down")
+        df = make_short_trigger_ohlcv()
         df = compute_indicators(df)
         signals = [generate_signal(df.iloc[: i + 1]) for i in range(220, len(df))]
         assert Signal.SHORT in signals

@@ -65,7 +65,7 @@ class TestBacktest:
             assert 0 <= result["win_rate_pct"] <= 100
 
     def test_runs_without_error_on_short_data(self):
-        """Backtest on short data (< 220 bars) returns no-trades result."""
+        """Backtest on 300 bars (short relative to indicator warm-up) returns no-trades or a valid result."""
         np.random.seed(7)
         prices = [40000.0]
         for _ in range(299):
