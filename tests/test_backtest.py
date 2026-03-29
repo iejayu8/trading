@@ -1,0 +1,110 @@
+"""
+Tests for the backtester (without network calls).
+"""
+
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "backtest"))
+
+from backtest import Backtest
+
+
+def make_ohlcv(n: int = 500, seed: int = 42) -> pd.DataFrame:
+    np.random.seed(seed)
+    prices = [40000.0]
+    for _ in range(n - 1):
+        prices.append(max(100, prices[-1] + np.random.normal(50, 200)))
+    df = pd.DataFrame(
+        {
+            "open":   [p * 0.9995 for p in prices],
+            "high":   [p * 1.005  for p in prices],
+            "low":    [p * 0.995  for p in prices],
+            "close":  prices,
+            "volume": [np.random.uniform(200, 800) for _ in prices],
+        }
+    )
+    df.index = pd.date_range("2024-01-01", periods=n, freq="15min", tz="UTC")
+    return df
+
+
+class TestBacktest:
+    def test_returns_summary_dict(self):
+        df = make_ohlcv()
+        bt = Backtest(initial_equity=1000.0)
+        result = bt.run(df)
+        assert isinstance(result, dict)
+        assert "return_pct" in result
+
+    def test_equity_tracked(self):
+        df = make_ohlcv()
+        bt = Backtest(initial_equity=1000.0)
+        bt.run(df)
+        assert bt.equity != 1000.0 or len(bt.trades) == 0
+
+    def test_trades_have_required_fields(self):
+        df = make_ohlcv(600)
+        bt = Backtest(initial_equity=1000.0)
+        bt.run(df)
+        if bt.trades:
+            t = bt.trades[0]
+            for field in ["direction", "entry_price", "exit_price", "size",
+                          "pnl", "reason", "opened_at", "closed_at"]:
+                assert field in t, f"Missing field: {field}"
+
+    def test_win_rate_in_range(self):
+        df = make_ohlcv(600)
+        bt = Backtest(initial_equity=1000.0)
+        result = bt.run(df)
+        if "win_rate_pct" in result:
+            assert 0 <= result["win_rate_pct"] <= 100
+
+    def test_runs_without_error_on_short_data(self):
+        """Backtest on 300 bars (short relative to indicator warm-up) returns no-trades or a valid result."""
+        np.random.seed(7)
+        prices = [40000.0]
+        for _ in range(299):
+            prices.append(max(100, prices[-1] + np.random.normal(80, 150)))
+        df = pd.DataFrame(
+            {
+                "open":   [p * 0.9995 for p in prices],
+                "high":   [p * 1.006  for p in prices],
+                "low":    [p * 0.994  for p in prices],
+                "close":  prices,
+                "volume": [np.random.uniform(300, 900) for _ in prices],
+            }
+        )
+        df.index = pd.date_range("2024-01-01", periods=300, freq="15min", tz="UTC")
+        bt = Backtest(initial_equity=1000.0)
+        result = bt.run(df)
+        # Short data: either no-trades error or a valid result
+        assert isinstance(result, dict)
+
+    def test_runs_on_longer_data(self):
+        """Backtest on >500 bars with pullback structure can produce trades."""
+        np.random.seed(7)
+        n = 600
+        prices = [40000.0]
+        for i in range(n - 1):
+            phase = i % 60
+            # Include pullback phases so RSI can dip
+            drift = -80 if (20 <= phase < 30) else 80
+            prices.append(max(100, prices[-1] + np.random.normal(drift, 150)))
+        df = pd.DataFrame(
+            {
+                "open":   [p * 0.9995 for p in prices],
+                "high":   [p * 1.008  for p in prices],
+                "low":    [p * 0.992  for p in prices],
+                "close":  prices,
+                "volume": [np.random.uniform(300, 900) for _ in prices],
+            }
+        )
+        df.index = pd.date_range("2024-01-01", periods=n, freq="15min", tz="UTC")
+        bt = Backtest(initial_equity=1000.0)
+        result = bt.run(df)
+        assert isinstance(result, dict)

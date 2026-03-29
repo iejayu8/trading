@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+.env
+
+# Credentials (NEVER commit real credentials)
+credentials.env
+*.secret
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Backtest data cache
+backtest/data/
+backtest/results/*.json
+
+# Node
+node_modules/
