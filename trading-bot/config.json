@@ -1,0 +1,46 @@
+{
+  "name": "Trading Bot",
+  "version": "1.0.0",
+  "slug": "trading_bot",
+  "description": "Run the BloFin trading bot and dashboard inside Home Assistant",
+  "startup": "application",
+  "boot": "auto",
+  "init": false,
+  "ingress": false,
+  "panel_icon": "mdi:chart-line",
+  "webui": "http://[HOST]:[PORT:5000]",
+  "ports": {
+    "5000/tcp": 5000
+  },
+  "ports_description": {
+    "5000/tcp": "Trading Bot Web UI"
+  },
+  "arch": [
+    "aarch64",
+    "amd64",
+    "armv7",
+    "i386"
+  ],
+  "options": {
+    "BLOFIN_API_KEY": "",
+    "BLOFIN_API_SECRET_B64": "",
+    "BLOFIN_API_PASSPHRASE": "",
+    "TRADING_MODE": "papertrading",
+    "PAPER_START_EQUITY": 1000,
+    "TRADING_SYMBOL": "BTC-USDT",
+    "TRADING_LEVERAGE": 5,
+    "RISK_PER_TRADE": 0.01,
+    "TRADING_MARGIN_MODE": "isolated"
+  },
+  "schema": {
+    "BLOFIN_API_KEY": "str",
+    "BLOFIN_API_SECRET_B64": "password",
+    "BLOFIN_API_PASSPHRASE": "password",
+    "TRADING_MODE": "list(papertrading|realtrading)",
+    "PAPER_START_EQUITY": "float(10,100000000)",
+    "TRADING_SYMBOL": "str",
+    "TRADING_LEVERAGE": "int(1,125)",
+    "RISK_PER_TRADE": "float(0.001,0.1)",
+    "TRADING_MARGIN_MODE": "list(cross|isolated)"
+  }
+}

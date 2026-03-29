@@ -40,3 +40,11 @@ class TestConfig:
     def test_supported_symbols_contains_btc(self):
         import config
         assert any("BTC" in s for s in config.SUPPORTED_SYMBOLS)
+
+    def test_trading_mode_is_valid(self):
+        import config
+        assert config.TRADING_MODE in {"papertrading", "realtrading"}
+
+    def test_paper_start_equity_positive(self):
+        import config
+        assert config.PAPER_START_EQUITY > 0
