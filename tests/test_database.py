@@ -11,27 +11,36 @@ import pytest
 # Redirect DB to a temp file during tests
 import database
 
-_tmp_dir = tempfile.mkdtemp()
-database.DB_PATH = Path(_tmp_dir) / "test_trading_bot.db"
-
 sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 
 
 class TestDatabase:
     def setup_method(self):
-        """Re-initialise a fresh DB for each test."""
-        if database.DB_PATH.exists():
-            database.DB_PATH.unlink()
+        """Use a unique temp DB per test to avoid Windows file lock races."""
+        self._tmp_dir = tempfile.mkdtemp()
+        database.DB_PATH = Path(self._tmp_dir) / "test_trading_bot.db"
         database.init_db()
 
+    def teardown_method(self):
+        # Best-effort cleanup for temp directory created in setup_method.
+        for p in Path(self._tmp_dir).glob("*"):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+        try:
+            Path(self._tmp_dir).rmdir()
+        except OSError:
+            pass
+
     def test_init_creates_tables(self):
-        conn = database._connect()
-        tables = {
-            row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
-        }
+        with database._connect() as conn:
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
         assert {"trades", "bot_logs", "bot_status"}.issubset(tables)
 
     def test_open_and_close_trade(self):

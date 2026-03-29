@@ -9,7 +9,9 @@ import hashlib
 import hmac
 import json
 import time
-from datetime import datetime, timezone
+import base64
+from urllib.parse import urlencode
+from uuid import uuid4
 from typing import Any
 
 import requests
@@ -31,36 +33,49 @@ class BloFinClient:
 
     # ── Authentication ────────────────────────────────────────────────────────
 
-    def _sign(self, timestamp: str, method: str, path: str, body: str = "") -> str:
-        """Generate HMAC-SHA256 signature for BloFin API."""
-        message = timestamp + method.upper() + path + (body or "")
-        return hmac.new(
+    def _sign(
+        self,
+        timestamp: str,
+        method: str,
+        path: str,
+        nonce: str,
+        body: str = "",
+    ) -> str:
+        """Generate BloFin signature: base64(hexdigest(HMAC_SHA256(path+method+ts+nonce+body)))."""
+        prehash = path + method.upper() + timestamp + nonce + (body or "")
+        hex_sig = hmac.new(
             self._secret.encode(),
-            message.encode(),
+            prehash.encode(),
             hashlib.sha256,
-        ).hexdigest()
+        ).hexdigest().encode()
+        return base64.b64encode(hex_sig).decode()
 
-    def _headers(self, method: str, path: str, body: str = "") -> dict[str, str]:
+    def _headers(self, method: str, path: str, nonce: str, body: str = "") -> dict[str, str]:
         ts = str(int(time.time() * 1000))
         return {
             "ACCESS-KEY": self._api_key,
-            "ACCESS-SIGN": self._sign(ts, method, path, body),
+            "ACCESS-SIGN": self._sign(ts, method, path, nonce, body),
             "ACCESS-TIMESTAMP": ts,
             "ACCESS-PASSPHRASE": self._passphrase,
+            "ACCESS-NONCE": nonce,
         }
 
     # ── Private helpers ───────────────────────────────────────────────────────
 
     def _get(self, path: str, params: dict | None = None) -> dict:
-        url = self.BASE_URL + path
-        headers = self._headers("GET", path)
-        resp = self._session.get(url, headers=headers, params=params, timeout=10)
+        query = urlencode(params or {}, doseq=True)
+        signed_path = f"{path}?{query}" if query else path
+        url = self.BASE_URL + signed_path
+        nonce = str(uuid4())
+        headers = self._headers("GET", signed_path, nonce)
+        resp = self._session.get(url, headers=headers, timeout=10)
         resp.raise_for_status()
         return resp.json()
 
     def _post(self, path: str, payload: dict) -> dict:
-        body = json.dumps(payload)
-        headers = self._headers("POST", path, body)
+        body = json.dumps(payload, separators=(",", ":"))
+        nonce = str(uuid4())
+        headers = self._headers("POST", path, nonce, body)
         url = self.BASE_URL + path
         resp = self._session.post(url, headers=headers, data=body, timeout=10)
         resp.raise_for_status()

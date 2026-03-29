@@ -1,0 +1,9 @@
+{
+  "include": ["backend", "tests", "backtest"],
+  "exclude": [".venv", "__pycache__", ".git"],
+  "pythonVersion": "3.13",
+  "pythonPlatform": "Windows",
+  "typeCheckingMode": "basic",
+  "venvPath": ".venv",
+  "extraPaths": ["backend", "backtest"]
+}
