@@ -5,7 +5,7 @@
  * Assumes the API server is running on the same host at port 5000.
  */
 
-const API = 'http://localhost:5000/api';
+const API = '/api';
 
 // ── Refresh interval (ms) ──────────────────────────────────────────────────
 const POLL_INTERVAL = 5000;
