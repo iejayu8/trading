@@ -1,0 +1,8 @@
+# Extra dependencies required by the Windows desktop launcher (desktop_app.py).
+# The core backend dependencies are in backend/requirements.txt.
+#
+# Install with:
+#   pip install -r requirements_desktop.txt
+
+pywebview>=4.0
+requests>=2.31.0
