@@ -100,6 +100,25 @@
       </div>
     </section>
 
+    <section class="panel">
+      <h2 class="panel__title">Market Context</h2>
+      <div class="market-grid">
+        <div class="chart-wrap">
+          <canvas id="price-chart"></canvas>
+        </div>
+        <div>
+          <div class="checklist-block">
+            <h3 class="sub-title">Long Conditions</h3>
+            <ul id="long-checks" class="checklist"></ul>
+          </div>
+          <div class="checklist-block">
+            <h3 class="sub-title">Short Conditions</h3>
+            <ul id="short-checks" class="checklist"></ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ── Activity Log ──────────────────────────────────────────────────── -->
     <section class="panel">
       <div class="panel__head">
@@ -110,6 +129,7 @@
     </section>
   </main>
 
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

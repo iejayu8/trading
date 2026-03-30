@@ -24,6 +24,8 @@ from flask_cors import CORS
 import config
 import database as db
 from bot import TradingBot
+from exchange import BloFinClient
+from strategy import compute_indicators, get_signal_checks, get_signal_diagnostics
 
 _FRONTEND_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
 
@@ -144,6 +146,77 @@ def api_config():
             "rsi_overbought": config.RSI_OVERBOUGHT,
             "volume_sma_period": config.VOLUME_SMA_PERIOD,
             "supported_symbols": config.SUPPORTED_SYMBOLS,
+        }
+    )
+
+
+@app.get("/api/market/context")
+def api_market_context():
+    symbol = request.args.get("symbol", config.TRADING_SYMBOL)
+    limit = int(request.args.get("limit", 120))
+    limit = max(60, min(limit, 200))
+
+    client = BloFinClient()
+    raw = client.get_candles(symbol, bar=config.TIMEFRAME, limit=limit)
+    if not raw:
+        return jsonify({"ok": False, "message": "No market candles available"}), 502
+
+    rows = list(reversed(raw))
+    if len(rows[0]) < 7:
+        return jsonify({"ok": False, "message": "Unexpected candle payload"}), 502
+
+    import pandas as pd
+    df_raw = pd.DataFrame(rows)
+    df = df_raw.iloc[:, :7].copy()
+    df.columns = ["ts", "open", "high", "low", "close", "volume", "vol_ccy"]
+    for col in ["open", "high", "low", "close", "volume"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["ts"] = pd.to_numeric(df["ts"], errors="coerce")
+    df["datetime"] = pd.to_datetime(df["ts"], unit="ms", utc=True)
+    df = df.set_index("datetime").sort_index()
+
+    df = compute_indicators(df)
+    diagnostics = get_signal_diagnostics(df)
+    checks = get_signal_checks(df)
+    values = checks.get("values", {})
+
+    candles = []
+    for ts, row in df.tail(limit).iterrows():
+        candles.append(
+            {
+                "ts": ts.isoformat(),
+                "close": float(row["close"]),
+                "ema_fast": float(row["ema_fast"]) if pd.notna(row["ema_fast"]) else None,
+                "ema_slow": float(row["ema_slow"]) if pd.notna(row["ema_slow"]) else None,
+                "ema_trend": float(row["ema_trend"]) if pd.notna(row["ema_trend"]) else None,
+                "ema_200": float(row["ema_200"]) if pd.notna(row["ema_200"]) else None,
+                "rsi": float(row["rsi"]) if pd.notna(row["rsi"]) else None,
+                "volume": float(row["volume"]) if pd.notna(row["volume"]) else None,
+                "volume_sma": float(row["volume_sma"]) if pd.notna(row["volume_sma"]) else None,
+            }
+        )
+
+    close = values.get("close")
+    ema_fast = values.get("ema_fast")
+    target_band = None
+    if close is not None and ema_fast is not None:
+        band = max(close * 0.002, 20.0)
+        target_band = {
+            "long": {"low": ema_fast - band, "high": ema_fast + band},
+            "short": {"low": ema_fast - band, "high": ema_fast + band},
+        }
+
+    return jsonify(
+        {
+            "ok": True,
+            "symbol": symbol,
+            "timeframe": config.TIMEFRAME,
+            "candles": candles,
+            "diagnostics": diagnostics,
+            "long_checks": checks.get("long_checks", {}),
+            "short_checks": checks.get("short_checks", {}),
+            "values": values,
+            "target_band": target_band,
         }
     )
 

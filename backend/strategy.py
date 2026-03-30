@@ -56,6 +56,7 @@ import numpy as np
 import config
 
 SIGNAL_COOLDOWN = 48
+MIN_BARS_REQUIRED = 200
 # Minimum bars between signal generation (~12 h on 15-min chart).
 # Prevents over-trading during choppy consolidation periods.
 
@@ -160,8 +161,7 @@ def generate_signal(df: pd.DataFrame) -> str:
 
     Returns Signal.LONG | Signal.SHORT | Signal.NONE
     """
-    min_bars = 220
-    if len(df) < min_bars:
+    if len(df) < MIN_BARS_REQUIRED:
         return Signal.NONE
 
     current_bar = len(df) - 1
@@ -179,33 +179,15 @@ def generate_signal(df: pd.DataFrame) -> str:
     if last["adx"] < ADX_MIN:
         return Signal.NONE
 
-    # Recent RSI window
-    rsi_window = df["rsi"].iloc[-(PULLBACK_LOOKBACK + 1):-1]
-    vol_ok     = last["volume"] >= VOLUME_MULT * last["volume_sma"]
+    checks = get_signal_checks(df)
 
     # ── Long: fresh pullback + recovery within uptrend ─────────────────────
-    if (
-        last["close"] > last["ema_200"]              # macro uptrend
-        and last["ema_slow"] > last["ema_trend"]     # medium-term bullish
-        and (rsi_window <= RSI_PULLBACK_MAX).any()   # RSI dipped (fresh pullback)
-        and last["rsi"] >= RSI_RECOVERY_LONG         # RSI recovered
-        and last["close"] > last["ema_fast"]         # price above fast EMA
-        and last["macd_hist"] >= -50                 # not in hard downtrend
-        and vol_ok
-    ):
+    if all(checks["long_checks"].values()):
         _last_signal_bar["bar"] = current_bar
         return Signal.LONG
 
     # ── Short: fresh rally + rejection within downtrend ────────────────────
-    if (
-        last["close"] < last["ema_200"]              # macro downtrend
-        and last["ema_slow"] < last["ema_trend"]     # medium-term bearish
-        and (rsi_window >= RSI_PULLBACK_MIN).any()   # RSI spiked (fresh pullback)
-        and last["rsi"] <= RSI_RECOVERY_SHORT        # RSI rejected
-        and last["close"] < last["ema_fast"]         # price below fast EMA
-        and last["macd_hist"] <= 50                  # not in hard uptrend
-        and vol_ok
-    ):
+    if all(checks["short_checks"].values()):
         _last_signal_bar["bar"] = current_bar
         return Signal.SHORT
 
@@ -218,8 +200,7 @@ def get_signal_diagnostics(df: pd.DataFrame) -> dict:
 
     Returns a dict with readiness flags and a human-readable waiting reason.
     """
-    # Bot currently fetches up to 200 candles per tick, so requirements must not exceed that.
-    min_bars = 200
+    min_bars = MIN_BARS_REQUIRED
     current_bar = len(df) - 1
 
     out = {
@@ -249,30 +230,9 @@ def get_signal_diagnostics(df: pd.DataFrame) -> dict:
         out["waiting_for"] = "Warming up indicators"
         return out
 
-    rsi_window = df["rsi"].iloc[-(PULLBACK_LOOKBACK + 1):-1]
-    vol_ok = last["volume"] >= VOLUME_MULT * last["volume_sma"]
-
-    long_checks = {
-        "ADX >= threshold": last["adx"] >= ADX_MIN,
-        "Price above EMA200": last["close"] > last["ema_200"],
-        "EMA21 above EMA55": last["ema_slow"] > last["ema_trend"],
-        "Recent RSI pullback": (rsi_window <= RSI_PULLBACK_MAX).any(),
-        "RSI recovered": last["rsi"] >= RSI_RECOVERY_LONG,
-        "Price above EMA9": last["close"] > last["ema_fast"],
-        "MACD filter": last["macd_hist"] >= -50,
-        "Volume filter": vol_ok,
-    }
-
-    short_checks = {
-        "ADX >= threshold": last["adx"] >= ADX_MIN,
-        "Price below EMA200": last["close"] < last["ema_200"],
-        "EMA21 below EMA55": last["ema_slow"] < last["ema_trend"],
-        "Recent RSI spike": (rsi_window >= RSI_PULLBACK_MIN).any(),
-        "RSI rejected": last["rsi"] <= RSI_RECOVERY_SHORT,
-        "Price below EMA9": last["close"] < last["ema_fast"],
-        "MACD filter": last["macd_hist"] <= 50,
-        "Volume filter": vol_ok,
-    }
+    checks = get_signal_checks(df)
+    long_checks = checks["long_checks"]
+    short_checks = checks["short_checks"]
 
     long_ready = all(long_checks.values())
     short_ready = all(short_checks.values())
@@ -297,6 +257,66 @@ def get_signal_diagnostics(df: pd.DataFrame) -> dict:
     out["signal_hint"] = f"WAIT_{target_side}"
     out["waiting_for"] = f"{target_side}: " + ", ".join(blockers[:3])
     return out
+
+
+def get_signal_checks(df: pd.DataFrame) -> dict:
+    """Return per-side checks and current indicator values used for entry decisions."""
+    if df.empty:
+        return {
+            "long_checks": {},
+            "short_checks": {},
+            "values": {},
+        }
+
+    last = df.iloc[-1]
+    rsi_window = df["rsi"].iloc[-(PULLBACK_LOOKBACK + 1):-1]
+    vol_threshold = VOLUME_MULT * last["volume_sma"] if pd.notna(last["volume_sma"]) else np.nan
+    vol_ok = pd.notna(last["volume"]) and pd.notna(vol_threshold) and last["volume"] >= vol_threshold
+
+    long_checks = {
+        "ADX >= threshold": bool(last["adx"] >= ADX_MIN),
+        "Price above EMA200": bool(last["close"] > last["ema_200"]),
+        "EMA21 above EMA55": bool(last["ema_slow"] > last["ema_trend"]),
+        "Recent RSI pullback": bool((rsi_window <= RSI_PULLBACK_MAX).any()),
+        "RSI recovered": bool(last["rsi"] >= RSI_RECOVERY_LONG),
+        "Price above EMA9": bool(last["close"] > last["ema_fast"]),
+        "MACD filter": bool(last["macd_hist"] >= -50),
+        "Volume filter": bool(vol_ok),
+    }
+
+    short_checks = {
+        "ADX >= threshold": bool(last["adx"] >= ADX_MIN),
+        "Price below EMA200": bool(last["close"] < last["ema_200"]),
+        "EMA21 below EMA55": bool(last["ema_slow"] < last["ema_trend"]),
+        "Recent RSI spike": bool((rsi_window >= RSI_PULLBACK_MIN).any()),
+        "RSI rejected": bool(last["rsi"] <= RSI_RECOVERY_SHORT),
+        "Price below EMA9": bool(last["close"] < last["ema_fast"]),
+        "MACD filter": bool(last["macd_hist"] <= 50),
+        "Volume filter": bool(vol_ok),
+    }
+
+    values = {
+        "close": float(last["close"]),
+        "ema_fast": float(last["ema_fast"]),
+        "ema_slow": float(last["ema_slow"]),
+        "ema_trend": float(last["ema_trend"]),
+        "ema_200": float(last["ema_200"]),
+        "rsi": float(last["rsi"]),
+        "volume": float(last["volume"]),
+        "volume_sma": float(last["volume_sma"]) if pd.notna(last["volume_sma"]) else None,
+        "volume_threshold": float(vol_threshold) if pd.notna(vol_threshold) else None,
+        "adx": float(last["adx"]),
+        "macd_hist": float(last["macd_hist"]),
+        "rsi_recovery_long": RSI_RECOVERY_LONG,
+        "rsi_recovery_short": RSI_RECOVERY_SHORT,
+        "adx_min": ADX_MIN,
+    }
+
+    return {
+        "long_checks": long_checks,
+        "short_checks": short_checks,
+        "values": values,
+    }
 
 
 def calculate_position_size(

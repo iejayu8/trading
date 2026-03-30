@@ -6,6 +6,7 @@
  */
 
 const API = '/api';
+let priceChart = null;
 
 // ── Refresh interval (ms) ──────────────────────────────────────────────────
 const POLL_INTERVAL = 5000;
@@ -41,6 +42,7 @@ async function refreshAll() {
   await Promise.allSettled([
     refreshStatus(),
     refreshStats(),
+    refreshMarketContext(),
     refreshOpenTrades(),
     refreshTradeHistory(),
     refreshLogs(),
@@ -213,6 +215,111 @@ async function refreshLogs() {
   container.scrollTop = container.scrollHeight;
 }
 
+async function refreshMarketContext() {
+  const ctx = await fetchJSON(`${API}/market/context?limit=120`);
+  if (!ctx.ok || !ctx.candles || !ctx.candles.length) return;
+
+  const labels = ctx.candles.map(c => fmtTs(c.ts));
+  const close = ctx.candles.map(c => c.close);
+  const emaFast = ctx.candles.map(c => c.ema_fast);
+  const emaSlow = ctx.candles.map(c => c.ema_slow);
+  const emaTrend = ctx.candles.map(c => c.ema_trend);
+  const ema200 = ctx.candles.map(c => c.ema_200);
+
+  const target = ctx.target_band?.long || null;
+  const targetUpper = target ? new Array(close.length).fill(target.high) : null;
+  const targetLower = target ? new Array(close.length).fill(target.low) : null;
+
+  const datasets = [
+    {
+      label: 'Price',
+      data: close,
+      borderColor: '#f0b90b',
+      borderWidth: 2,
+      pointRadius: 0,
+      tension: 0.2,
+    },
+    {
+      label: 'EMA9',
+      data: emaFast,
+      borderColor: '#3fb950',
+      borderWidth: 1.6,
+      pointRadius: 0,
+      tension: 0.2,
+    },
+    {
+      label: 'EMA21',
+      data: emaSlow,
+      borderColor: '#388bfd',
+      borderWidth: 1.4,
+      pointRadius: 0,
+      tension: 0.2,
+    },
+    {
+      label: 'EMA55',
+      data: emaTrend,
+      borderColor: '#f97316',
+      borderWidth: 1.2,
+      pointRadius: 0,
+      tension: 0.2,
+    },
+    {
+      label: 'EMA200',
+      data: ema200,
+      borderColor: '#8b949e',
+      borderWidth: 1,
+      pointRadius: 0,
+      tension: 0.2,
+    },
+  ];
+
+  if (targetUpper && targetLower) {
+    datasets.push(
+      {
+        label: 'Target Zone Upper',
+        data: targetUpper,
+        borderColor: 'rgba(63,185,80,0.18)',
+        borderWidth: 0,
+        pointRadius: 0,
+        fill: false,
+      },
+      {
+        label: 'Long Target Zone',
+        data: targetLower,
+        borderColor: 'rgba(63,185,80,0.18)',
+        backgroundColor: 'rgba(63,185,80,0.12)',
+        borderWidth: 0,
+        pointRadius: 0,
+        fill: '-1',
+      }
+    );
+  }
+
+  const chartData = { labels, datasets };
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { labels: { color: '#e6edf3' } },
+    },
+    scales: {
+      x: { ticks: { color: '#8b949e', maxRotation: 0 }, grid: { color: '#1f2937' } },
+      y: { ticks: { color: '#8b949e' }, grid: { color: '#1f2937' } },
+    },
+  };
+
+  const canvas = document.getElementById('price-chart');
+  if (!priceChart) {
+    priceChart = new Chart(canvas, { type: 'line', data: chartData, options: chartOptions });
+  } else {
+    priceChart.data = chartData;
+    priceChart.update('none');
+  }
+
+  renderChecks('long-checks', ctx.long_checks || {});
+  renderChecks('short-checks', ctx.short_checks || {});
+}
+
 // ── Bot control ────────────────────────────────────────────────────────────
 
 async function startBot() {
@@ -268,6 +375,25 @@ function modeClass(mode) {
   if (mode === 'papertrading') return 'text-blue';
   if (mode === 'realtrading') return 'text-green';
   return 'text-gold';
+}
+
+function renderChecks(containerId, checks) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+
+  const items = Object.entries(checks);
+  if (!items.length) {
+    el.innerHTML = '<li><span>No data</span><span class="check-badge check-badge--no">N/A</span></li>';
+    return;
+  }
+
+  el.innerHTML = items
+    .map(([name, ok]) => {
+      const cls = ok ? 'check-badge--ok' : 'check-badge--no';
+      const text = ok ? 'OK' : 'WAIT';
+      return `<li><span>${escHtml(name)}</span><span class="check-badge ${cls}">${text}</span></li>`;
+    })
+    .join('');
 }
 
 function statusBadge(status) {
