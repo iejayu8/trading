@@ -251,9 +251,10 @@ def api_market_context():
 
     candles = []
     for ts, row in df.tail(limit).iterrows():
+        ts_iso = ts.isoformat() if isinstance(ts, pd.Timestamp) else str(ts)
         candles.append(
             {
-                "ts": ts.isoformat(),
+                "ts": ts_iso,
                 "close": float(row["close"]),
                 "ema_fast": float(row["ema_fast"]) if pd.notna(row["ema_fast"]) else None,
                 "ema_slow": float(row["ema_slow"]) if pd.notna(row["ema_slow"]) else None,
