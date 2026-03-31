@@ -1,4 +1,9 @@
 @echo off
+setlocal
+
+set "PYTHON=python"
+if exist ".venv\Scripts\python.exe" set "PYTHON=.venv\Scripts\python.exe"
+
 :: ============================================================
 :: build_exe.bat – Package desktop_app.py into a standalone
 :: Windows executable using PyInstaller.
@@ -13,14 +18,20 @@
 ::   3. The finished executable will be in the  dist\  folder.
 :: ============================================================
 
+echo Installing backend dependencies...
+"%PYTHON%" -m pip install --quiet -r backend\requirements.txt
+
+echo Installing desktop dependencies...
+"%PYTHON%" -m pip install --quiet -r requirements_desktop.txt
+
 echo Installing PyInstaller...
-pip install --quiet pyinstaller
+"%PYTHON%" -m pip install --quiet pyinstaller
 
 echo.
 echo Building BloFin Trading Bot executable...
 echo.
 
-pyinstaller ^
+"%PYTHON%" -m PyInstaller ^
   --onefile ^
   --windowed ^
   --name "BloFin Trading Bot" ^
@@ -46,3 +57,5 @@ if exist "dist\BloFin Trading Bot.exe" (
   echo Build FAILED. Check the output above for errors.
   exit /b 1
 )
+
+endlocal

@@ -35,9 +35,18 @@ import webview
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-BACKEND_SCRIPT = os.path.join(BASE_DIR, "backend", "app.py")
-CREDENTIALS_FILE = os.path.join(BASE_DIR, "credentials.env")
+# APP_DIR points to bundled app resources:
+# - source run: repository root (this file's folder)
+# - PyInstaller onefile: temporary extraction folder (_MEIPASS)
+APP_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+
+# USER_DIR points to where the launcher lives:
+# - source run: repository root
+# - PyInstaller exe: directory containing the .exe
+USER_DIR = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
+
+BACKEND_SCRIPT = os.path.join(APP_DIR, "backend", "app.py")
+CREDENTIALS_FILE = os.path.join(USER_DIR, "credentials.env")
 BACKEND_URL = "http://localhost:5000"
 
 
@@ -49,7 +58,7 @@ def _resolve_python() -> str:
     2. sys.executable (correct when packaged with PyInstaller as an .exe).
     """
     if not getattr(sys, "frozen", False):
-        venv_python = os.path.join(BASE_DIR, ".venv", "Scripts", "python.exe")
+        venv_python = os.path.join(APP_DIR, ".venv", "Scripts", "python.exe")
         if os.path.isfile(venv_python):
             return venv_python
     return sys.executable
@@ -168,7 +177,7 @@ def start_backend() -> subprocess.Popen:
     # backend script directly – Python will handle it via the bundled runtime.
     _backend_proc = subprocess.Popen(
         [_resolve_python(), BACKEND_SCRIPT],
-        cwd=os.path.join(BASE_DIR, "backend"),
+        cwd=os.path.join(APP_DIR, "backend"),
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
