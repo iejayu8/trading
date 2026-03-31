@@ -276,23 +276,19 @@ async function refreshMarketContext() {
   if (targetUpper && targetLower) {
     datasets.push(
       {
-        // Upper boundary – fill anchor only, hidden from legend
         label: 'Target Zone Upper',
         data: targetUpper,
-        borderColor: 'rgba(63,185,80,0.4)',
-        backgroundColor: 'rgba(63,185,80,0.12)',
-        borderWidth: 1,
-        borderDash: [4, 4],
+        borderColor: 'rgba(63,185,80,0.18)',
+        borderWidth: 0,
         pointRadius: 0,
         fill: false,
       },
       {
         label: 'Long Target Zone',
         data: targetLower,
-        borderColor: 'rgba(63,185,80,0.4)',
+        borderColor: 'rgba(63,185,80,0.18)',
         backgroundColor: 'rgba(63,185,80,0.12)',
-        borderWidth: 1,
-        borderDash: [4, 4],
+        borderWidth: 0,
         pointRadius: 0,
         fill: '-1',
       }
@@ -304,13 +300,7 @@ async function refreshMarketContext() {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
-      legend: {
-        labels: {
-          color: '#e6edf3',
-          // Hide the upper-boundary helper; only show 'Long Target Zone'
-          filter: (item) => item.text !== 'Target Zone Upper',
-        },
-      },
+      legend: { labels: { color: '#e6edf3' } },
     },
     scales: {
       x: { ticks: { color: '#8b949e', maxRotation: 0 }, grid: { color: '#1f2937' } },
