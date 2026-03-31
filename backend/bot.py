@@ -14,17 +14,36 @@ from uuid import uuid4
 
 import pandas as pd
 
-import config
-import database as db
-from exchange import BloFinClient
-from strategy import (
-    Signal,
-    calculate_position_size,
-    calculate_sl_tp,
-    compute_indicators,
-    get_signal_diagnostics,
-    generate_signal,
-)
+# Import policy:
+# Prefer package-relative imports when running as `python -m backend.app`.
+# Keep absolute fallback for direct-module contexts used by tests and some tools.
+try:
+    from . import config
+    from . import database as db
+    from .exchange import BloFinClient
+    from .strategy import (
+        Signal,
+        calculate_position_size,
+        calculate_sl_tp,
+        compute_indicators,
+        get_signal_diagnostics,
+        generate_signal,
+        reset_signal_state,
+    )
+except ImportError:
+    import importlib
+
+    config = importlib.import_module("config")
+    db = importlib.import_module("database")
+    BloFinClient = importlib.import_module("exchange").BloFinClient
+    _strategy = importlib.import_module("strategy")
+    Signal = _strategy.Signal
+    calculate_position_size = _strategy.calculate_position_size
+    calculate_sl_tp = _strategy.calculate_sl_tp
+    compute_indicators = _strategy.compute_indicators
+    get_signal_diagnostics = _strategy.get_signal_diagnostics
+    generate_signal = _strategy.generate_signal
+    reset_signal_state = _strategy.reset_signal_state
 
 
 class TradingBot:
@@ -45,10 +64,16 @@ class TradingBot:
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
 
+        # Per-symbol risk parameters (allows different SL/TP per asset)
+        sym_params = config.get_symbol_params(self.symbol)
+        self._stop_loss_pct = sym_params["stop_loss_pct"]
+        self._take_profit_pct = sym_params["take_profit_pct"]
+
         db.init_db()
-        db.update_bot_status(running=0, symbol=self.symbol)
+        db.update_bot_status(symbol=self.symbol, running=0)
         db.log_event(
-            f"Bot initialised for {self.symbol} (leverage {self.leverage}x, mode {self.trading_mode})"
+            f"Bot initialised for {self.symbol} (leverage {self.leverage}x, mode {self.trading_mode}, "
+            f"SL {self._stop_loss_pct*100:.1f}%, TP {self._take_profit_pct*100:.1f}%)"
         )
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -59,8 +84,8 @@ class TradingBot:
                 return
             self._running = True
             self._stop_event.clear()
-        db.update_bot_status(running=1)
-        db.log_event("Bot started")
+        db.update_bot_status(symbol=self.symbol, running=1)
+        db.log_event(f"Bot started ({self.symbol})")
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
 
@@ -73,8 +98,8 @@ class TradingBot:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2)
 
-        db.update_bot_status(running=0)
-        db.log_event("Bot stopped")
+        db.update_bot_status(symbol=self.symbol, running=0)
+        db.log_event(f"Bot stopped ({self.symbol})")
 
     @property
     def is_running(self) -> bool:
@@ -121,8 +146,9 @@ class TradingBot:
         df = compute_indicators(df)
 
         # Persist strategy diagnostics so UI can show what entry conditions are pending.
-        diag = get_signal_diagnostics(df)
+        diag = get_signal_diagnostics(df, symbol=self.symbol)
         db.update_bot_status(
+            symbol=self.symbol,
             signal_hint=diag.get("signal_hint", "WAIT"),
             waiting_for=diag.get("waiting_for", "Collecting candles"),
             long_ready=1 if diag.get("long_ready") else 0,
@@ -130,7 +156,7 @@ class TradingBot:
         )
 
         last_price = float(df["close"].iloc[-1])
-        db.update_bot_status(last_price=last_price)
+        db.update_bot_status(symbol=self.symbol, last_price=last_price)
 
         # ── Account equity ───────────────────────────────────────────────────
         if self.paper_trading:
@@ -146,7 +172,7 @@ class TradingBot:
                 equity = None
 
         if equity is not None:
-            db.update_bot_status(equity=equity)
+            db.update_bot_status(symbol=self.symbol, equity=equity)
 
         # ── Daily loss guard ─────────────────────────────────────────────────
         if equity is not None and self._daily_loss_exceeded(equity):
@@ -161,8 +187,8 @@ class TradingBot:
         self._manage_open_trades(open_trades, last_price)
 
         # ── Generate signal ───────────────────────────────────────────────────
-        signal = generate_signal(df)
-        db.update_bot_status(last_signal=signal)
+        signal = generate_signal(df, symbol=self.symbol)
+        db.update_bot_status(symbol=self.symbol, last_signal=signal)
         db.log_event(f"Signal: {signal} @ {last_price:.2f}")
 
         # ── Enter new position ────────────────────────────────────────────────
@@ -191,9 +217,34 @@ class TradingBot:
             )
 
             if hit_sl or hit_tp:
+                reason = "TP" if hit_tp else "SL"
+                if not self.paper_trading:
+                    # Keep local state OPEN unless exchange confirms the close order.
+                    try:
+                        close_side = "sell" if direction == Signal.LONG else "buy"
+                        close_cid = f"close-{self.symbol}-{int(time.time() * 1000)}-{uuid4().hex[:8]}"
+                        resp = self._call_with_retries(
+                            self._client.place_order,
+                            self.symbol,
+                            close_side,
+                            "market",
+                            size,
+                            client_order_id=close_cid,
+                            label="close_order",
+                        )
+                        code = str(resp.get("code", "0")) if isinstance(resp, dict) else "0"
+                        if code != "0":
+                            db.log_event(
+                                f"Close order rejected for trade {trade['id']} (code={code}, msg={resp.get('msg')})",
+                                level="ERROR",
+                            )
+                            continue
+                    except Exception as exc:
+                        db.log_event(f"Close order failed for trade {trade['id']}: {exc}", level="ERROR")
+                        continue
+
                 pnl = _calc_pnl(direction, entry, current_price, size)
                 db.close_trade(trade["id"], current_price, pnl)
-                reason = "TP" if hit_tp else "SL"
                 db.log_event(
                     f"Trade {trade['id']} closed ({reason}) "
                     f"@ {current_price:.2f}  PnL={pnl:.4f} USDT"
@@ -201,21 +252,17 @@ class TradingBot:
 
                 if self.paper_trading:
                     db.log_event(f"[PAPER] Simulated close for trade {trade['id']}")
-                else:
-                    # Place close order on exchange (best-effort)
-                    try:
-                        close_side = "sell" if direction == Signal.LONG else "buy"
-                        self._client.place_order(
-                            self.symbol, close_side, "market", size
-                        )
-                    except Exception as exc:
-                        db.log_event(f"Close order failed: {exc}", level="ERROR")
 
     def _enter_trade(
         self, signal: str, price: float, equity: float
     ) -> None:
-        size = calculate_position_size(equity, price)
-        sl, tp = calculate_sl_tp(price, signal)
+        size = calculate_position_size(
+            equity, price,
+            stop_loss_pct=self._stop_loss_pct,
+        )
+        sl, tp = calculate_sl_tp(price, signal,
+                                  stop_loss_pct=self._stop_loss_pct,
+                                  take_profit_pct=self._take_profit_pct)
         side = "buy" if signal == Signal.LONG else "sell"
         client_order_id = f"bot-{self.symbol}-{int(time.time() * 1000)}-{uuid4().hex[:8]}"
 
@@ -323,7 +370,8 @@ class TradingBot:
                 level="WARNING",
             )
             for trade in local_open_trades:
-                db.close_trade(trade["id"], mark_price, 0.0)
+                pnl = _calc_pnl(trade["direction"], trade["entry_price"], mark_price, trade["size"])
+                db.close_trade(trade["id"], mark_price, pnl)
             return []
 
         if exchange_has_position and not local_open_trades:
@@ -337,7 +385,7 @@ class TradingBot:
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _daily_loss_exceeded(self, current_equity: float) -> bool:
-        """Simple daily P&L check using DB trade records."""
+        """Simple daily P&L check using DB trade records for this symbol."""
         today = datetime.now(timezone.utc).date().isoformat()
         trades = db.get_trade_history(self.symbol, limit=50)
         daily_pnl = sum(
@@ -350,8 +398,8 @@ class TradingBot:
         return False
 
     def _paper_equity(self) -> float:
-        """Simulated equity for paper mode: start_equity + closed PnL."""
-        stats = db.get_trade_stats()
+        """Simulated equity for paper mode: start_equity + closed PnL for this symbol."""
+        stats = db.get_trade_stats(symbol=self.symbol)
         total_pnl = float(stats.get("total_pnl") or 0)
         return float(config.PAPER_START_EQUITY) + total_pnl
 

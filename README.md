@@ -1,8 +1,48 @@
 # trading
 
+## Backend Import Policy
+
+Backend modules prefer package-relative imports (for example, `from . import config`).
+
+Some workflows in this repository still execute backend modules in direct-module mode
+(tests and certain local tooling), where package-relative imports are unavailable. For
+that reason, selected backend files keep a narrow `ImportError` fallback to absolute
+imports.
+
+In short:
+
+- Preferred runtime mode: `python -m backend.app`
+- Supported compatibility mode: direct module imports with fallback
+
+This keeps package execution as the standard while preserving compatibility during
+migration.
+
+## Run As Windows Desktop App
+
+This repository also includes a desktop launcher for Windows:
+
+1. Install dependencies:
+	- `pip install -r backend/requirements.txt`
+	- `pip install -r requirements_desktop.txt`
+2. Run from source:
+	- `python desktop_app.py`
+3. Or build an executable:
+	- `build_exe.bat`
+
+Desktop-specific files are:
+
+- `desktop_app.py`
+- `build_exe.bat`
+- `requirements_desktop.txt`
+
+The desktop launcher always runs the same root application code from `backend` and `frontend`.
+
 ## Run In Home Assistant
 
 This repository includes a Home Assistant add-on package at `trading-bot`.
+
+The add-on package only contains Home Assistant-specific files.
+The application source of truth remains in the top-level `backend` and `frontend` folders, which are copied into the add-on image during build.
 
 ### 1) Push this repository to GitHub
 

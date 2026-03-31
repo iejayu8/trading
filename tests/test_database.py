@@ -80,6 +80,21 @@ class TestDatabase:
         assert stats["losses"] == 1
         assert abs(stats["win_rate"] - 66.67) < 0.1
 
+    def test_trade_stats_per_symbol(self):
+        """Per-symbol stats only count trades for that symbol."""
+        tid = database.open_trade("BTC-USDT", "LONG", 40000.0, 0.001, 39400.0, 41200.0, 5)
+        database.close_trade(tid, 41200.0, 5.0)
+        tid = database.open_trade("ETH-USDT", "SHORT", 2000.0, 0.01, 2050.0, 1950.0, 5)
+        database.close_trade(tid, 1950.0, 2.0)
+
+        btc_stats = database.get_trade_stats(symbol="BTC-USDT")
+        eth_stats = database.get_trade_stats(symbol="ETH-USDT")
+        all_stats = database.get_trade_stats()
+
+        assert btc_stats["total"] == 1
+        assert eth_stats["total"] == 1
+        assert all_stats["total"] == 2
+
     def test_log_event_and_get_logs(self):
         database.log_event("Test message", level="INFO")
         database.log_event("Warning message", level="WARNING")
@@ -89,8 +104,31 @@ class TestDatabase:
         assert logs[0]["level"] == "WARNING"  # newest first
 
     def test_bot_status_update(self):
-        database.update_bot_status(running=1, last_signal="LONG", last_price=42000.0)
-        status = database.get_bot_status()
+        database.update_bot_status(symbol="BTC-USDT", running=1, last_signal="LONG", last_price=42000.0)
+        status = database.get_bot_status(symbol="BTC-USDT")
         assert status["running"] == 1
         assert status["last_signal"] == "LONG"
         assert status["last_price"] == 42000.0
+
+    def test_bot_status_per_symbol_isolation(self):
+        """BTC and ETH status rows are independent."""
+        database.update_bot_status(symbol="BTC-USDT", running=1, last_signal="LONG")
+        database.update_bot_status(symbol="ETH-USDT", running=0, last_signal="SHORT")
+
+        btc = database.get_bot_status(symbol="BTC-USDT")
+        eth = database.get_bot_status(symbol="ETH-USDT")
+
+        assert btc["running"] == 1
+        assert btc["last_signal"] == "LONG"
+        assert eth["running"] == 0
+        assert eth["last_signal"] == "SHORT"
+
+    def test_update_bot_status_requires_symbol(self):
+        """Missing symbol should fail fast to surface migration issues."""
+        with pytest.raises(TypeError):
+            database.update_bot_status(running=1)
+
+    def test_get_bot_status_requires_symbol(self):
+        """Missing symbol should fail fast to surface migration issues."""
+        with pytest.raises(TypeError):
+            database.get_bot_status()

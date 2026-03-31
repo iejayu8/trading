@@ -16,7 +16,15 @@ from typing import Any
 
 import requests
 
-import config
+# Import policy:
+# Prefer package-relative imports when running as `python -m backend.app`.
+# Keep absolute fallback for direct-module contexts used by tests and some tools.
+try:
+    from . import config
+except ImportError:
+    import importlib
+
+    config = importlib.import_module("config")
 
 
 class BloFinClient:

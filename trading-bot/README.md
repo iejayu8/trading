@@ -2,6 +2,9 @@
 
 This add-on runs the BloFin trading bot and dashboard inside Home Assistant.
 
+This folder contains only Home Assistant add-on packaging files.
+The runtime application code is built from the repository root `backend` and `frontend` directories.
+
 ## What it runs
 
 - Flask API + Web UI on port 5000

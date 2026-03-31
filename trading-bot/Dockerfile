@@ -7,6 +7,7 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /app
 
+# Build context is the repository root; use the main app sources as the single source of truth.
 COPY backend/requirements.txt /app/backend/requirements.txt
 RUN pip3 install --no-cache-dir -r /app/backend/requirements.txt
 

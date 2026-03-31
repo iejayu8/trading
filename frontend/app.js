@@ -1,24 +1,74 @@
 /**
- * app.js – Trading Bot Dashboard logic.
+ * app.js – Multi-symbol Trading Bot Dashboard.
  *
- * Polls the Flask API every 5 s to update all panels.
- * Assumes the API server is running on the same host at port 5000.
+ * Architecture:
+ *  • Common data (equity, mode, total PnL/WR, logs) is fetched globally.
+ *  • Per-symbol data (price, signal, setup, positions, trades, chart) is
+ *    fetched for the currently-selected tab symbol.
+ *  • Activity log is shared across all symbols (bottom of page).
+ *  • Polls every 5 s via Promise.allSettled for resilience.
  */
 
 const API = '/api';
-let priceChart = null;
-
-// ── Refresh interval (ms) ──────────────────────────────────────────────────
 const POLL_INTERVAL = 5000;
 
+let priceChart = null;
+let _activeSymbol = null;   // currently selected tab
+let _symbols = [];           // list from /api/symbols
+
 // ── Boot ───────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  loadConfig();
-  refreshAll();
+document.addEventListener('DOMContentLoaded', async () => {
+  await initSymbols();
+  await refreshAll();
   setInterval(refreshAll, POLL_INTERVAL);
 });
 
-// ── Data fetchers ──────────────────────────────────────────────────────────
+// ── Symbol tab initialisation ─────────────────────────────────────────────
+
+async function initSymbols() {
+  try {
+    _symbols = await fetchJSON(`${API}/symbols`);
+  } catch {
+    _symbols = ['BTC-USDT'];
+  }
+  _activeSymbol = _symbols[0];
+  renderTabs();
+  await loadConfig(_activeSymbol);
+}
+
+function renderTabs() {
+  const container = document.getElementById('symbol-tabs');
+  container.innerHTML = '';
+  _symbols.forEach(sym => {
+    const btn = document.createElement('button');
+    btn.className = 'tab-btn' + (sym === _activeSymbol ? ' tab-btn--active' : '');
+    btn.textContent = sym;
+    btn.dataset.symbol = sym;
+    btn.onclick = () => switchSymbol(sym);
+    container.appendChild(btn);
+  });
+}
+
+async function switchSymbol(sym) {
+  if (sym === _activeSymbol) return;
+  _activeSymbol = sym;
+
+  // Update tab appearance
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.toggle('tab-btn--active', b.dataset.symbol === sym);
+  });
+
+  // Destroy existing chart so it re-renders for new symbol
+  if (priceChart) {
+    priceChart.destroy();
+    priceChart = null;
+  }
+
+  await loadConfig(sym);
+  await refreshSymbolPanel();
+}
+
+// ── Fetch helpers ──────────────────────────────────────────────────────────
 
 async function fetchJSON(url) {
   const resp = await fetch(url);
@@ -26,43 +76,63 @@ async function fetchJSON(url) {
   return resp.json();
 }
 
-// ── Formatting helpers ─────────────────────────────────────────────────────
-
-/** Format a number as a USD price: $12,345.67 */
-function formatPrice(value) {
-  return `$${Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-/** Format a number with fixed 2 decimal places (no locale grouping). */
-function formatFixed2(value) {
-  return Number(value).toFixed(2);
-}
+// ── Main refresh ──────────────────────────────────────────────────────────
 
 async function refreshAll() {
   await Promise.allSettled([
-    refreshStatus(),
-    refreshStats(),
-    refreshMarketContext(),
-    refreshOpenTrades(),
-    refreshTradeHistory(),
+    refreshGlobal(),
+    refreshSymbolPanel(),
     refreshLogs(),
   ]);
 }
 
-async function refreshStatus() {
-  const s = await fetchJSON(`${API}/status`);
+// ── Global (common) section ───────────────────────────────────────────────
 
-  // Bot running indicator
-  const running = s.running === 1;
+async function refreshGlobal() {
+  await Promise.allSettled([
+    refreshAllStatus(),
+    refreshStats(),
+  ]);
+}
+
+async function refreshAllStatus() {
+  // Fetch all-symbol status dict
+  let allStatus;
+  try {
+    allStatus = await fetchJSON(`${API}/status`);
+  } catch { return; }
+
+  // Bot running = any symbol is running
+  const anyRunning = Object.values(allStatus).some(s => s.running === 1);
   document.getElementById('bot-indicator').className =
-    `indicator ${running ? 'indicator--running' : 'indicator--stopped'}`;
-  document.getElementById('bot-status-text').textContent = running ? 'Running' : 'Stopped';
-  document.getElementById('btn-start').disabled = running;
-  document.getElementById('btn-stop').disabled  = !running;
+    `indicator ${anyRunning ? 'indicator--running' : 'indicator--stopped'}`;
+  document.getElementById('bot-status-text').textContent = anyRunning ? 'Running' : 'Stopped';
+  document.getElementById('btn-start').disabled = anyRunning;
+  document.getElementById('btn-stop').disabled  = !anyRunning;
 
-  // KPI cards
-  document.getElementById('kpi-symbol').textContent  = s.symbol || '–';
-  document.getElementById('kpi-price').textContent   =
+  // Equity: sum across all running bots (or show active symbol's)
+  const activeStatus = allStatus[_activeSymbol] || {};
+  const modeEl = document.getElementById('kpi-mode');
+  const mode = String(activeStatus.trading_mode || 'realtrading').toLowerCase();
+  modeEl.textContent = mode.toUpperCase();
+  modeEl.className = 'card__value ' + modeClass(mode);
+
+  // Equity: use first available
+  let equity = null;
+  for (const s of Object.values(allStatus)) {
+    if (s.equity != null) { equity = s.equity; break; }
+  }
+  document.getElementById('kpi-equity').textContent =
+    equity != null ? `$${Number(equity).toFixed(2)}` : '–';
+
+  // Also update per-symbol status strip for active tab
+  updateSymbolStatusStrip(activeStatus);
+}
+
+function updateSymbolStatusStrip(s) {
+  if (!s) return;
+
+  document.getElementById('kpi-price').textContent =
     s.last_price ? formatPrice(s.last_price) : '–';
 
   const sigEl = document.getElementById('kpi-signal');
@@ -74,43 +144,64 @@ async function refreshStatus() {
   setupEl.textContent = hint.replaceAll('_', ' ');
   setupEl.className = 'card__value ' + setupClass(hint);
 
-  const waitingEl = document.getElementById('kpi-waiting');
-  waitingEl.textContent = s.waiting_for || 'Collecting candles';
-  waitingEl.className = 'card__value card__value--small';
-
-  document.getElementById('kpi-equity').textContent =
-    s.equity ? `$${Number(s.equity).toFixed(2)}` : '–';
-
-  const mode = String(s.trading_mode || '').toLowerCase();
-  if (mode) {
-    const modeEl = document.getElementById('kpi-mode');
-    modeEl.textContent = mode.toUpperCase();
-    modeEl.className = 'card__value ' + modeClass(mode);
-  }
+  document.getElementById('kpi-waiting').textContent = s.waiting_for || 'Collecting candles';
 }
 
 async function refreshStats() {
-  const st = await fetchJSON(`${API}/stats`);
+  // Aggregate stats (all symbols)
+  let st;
+  try { st = await fetchJSON(`${API}/stats`); } catch { return; }
 
   const pnlEl = document.getElementById('kpi-pnl');
   const pnl = Number(st.total_pnl || 0);
   pnlEl.textContent = `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`;
   pnlEl.className = 'card__value ' + (pnl >= 0 ? 'text-green' : 'text-red');
 
-  document.getElementById('kpi-winrate').textContent =
-    st.total ? `${st.win_rate}%` : '–';
+  document.getElementById('kpi-winrate').textContent = st.total ? `${st.win_rate}%` : '–';
+  document.getElementById('kpi-total-trades').textContent = st.total || 0;
 }
 
-async function loadConfig() {
-  const cfg = await fetchJSON(`${API}/config`);
+// ── Per-symbol section ────────────────────────────────────────────────────
+
+async function refreshSymbolPanel() {
+  const sym = _activeSymbol;
+  await Promise.allSettled([
+    refreshSymbolStatus(sym),
+    refreshSymbolStats(sym),
+    refreshMarketContext(sym),
+    refreshOpenTrades(sym),
+    refreshTradeHistory(sym),
+  ]);
+}
+
+async function refreshSymbolStatus(sym) {
+  let s;
+  try { s = await fetchJSON(`${API}/status?symbol=${encodeURIComponent(sym)}`); }
+  catch { return; }
+  updateSymbolStatusStrip(s);
+}
+
+async function refreshSymbolStats(sym) {
+  let st;
+  try { st = await fetchJSON(`${API}/stats?symbol=${encodeURIComponent(sym)}`); }
+  catch { return; }
+
+  const symPnlEl = document.getElementById('kpi-sym-pnl');
+  const pnl = Number(st.total_pnl || 0);
+  symPnlEl.textContent = `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`;
+  symPnlEl.className = 'card__value ' + (pnl >= 0 ? 'text-green' : 'text-red');
+
+  document.getElementById('kpi-sym-wr').textContent = st.total ? `${st.win_rate}%` : '–';
+}
+
+async function loadConfig(sym) {
+  let cfg;
+  try { cfg = await fetchJSON(`${API}/config?symbol=${encodeURIComponent(sym)}`); }
+  catch { return; }
+
   const tbody = document.querySelector('#param-table tbody');
   tbody.innerHTML = '';
-
   const mode = String(cfg.trading_mode || 'realtrading').toLowerCase();
-  const modeEl = document.getElementById('kpi-mode');
-  modeEl.textContent = mode.toUpperCase();
-  modeEl.className = 'card__value ' + modeClass(mode);
-
   const rows = [
     ['Symbol',           cfg.symbol],
     ['Trading Mode',     mode],
@@ -127,7 +218,6 @@ async function loadConfig() {
     ['RSI Overbought',   cfg.rsi_overbought],
     ['Volume SMA',       cfg.volume_sma_period],
   ];
-
   rows.forEach(([k, v]) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `<td>${k}</td><td><strong>${v}</strong></td>`;
@@ -135,11 +225,13 @@ async function loadConfig() {
   });
 }
 
-async function refreshOpenTrades() {
-  const trades = await fetchJSON(`${API}/trades/open`);
+async function refreshOpenTrades(sym) {
+  let trades;
+  try { trades = await fetchJSON(`${API}/trades/open?symbol=${encodeURIComponent(sym)}`); }
+  catch { return; }
+
   const container = document.getElementById('open-trades-container');
   container.innerHTML = '';
-
   if (!trades.length) {
     container.innerHTML = '<p class="empty-msg">No open positions</p>';
     return;
@@ -152,7 +244,7 @@ async function refreshOpenTrades() {
       <div class="position-card">
         <div class="direction ${pnlCls}">${dir} ${t.symbol}</div>
         <div class="pos-row"><label>Entry</label><span>${formatPrice(t.entry_price)}</span></div>
-        <div class="pos-row"><label>Size</label><span>${t.size} BTC</span></div>
+        <div class="pos-row"><label>Size</label><span>${t.size}</span></div>
         <div class="pos-row"><label>SL</label><span class="text-red">${formatPrice(t.sl_price)}</span></div>
         <div class="pos-row"><label>TP</label><span class="text-green">${formatPrice(t.tp_price)}</span></div>
         <div class="pos-row"><label>Leverage</label><span>${t.leverage}×</span></div>
@@ -161,11 +253,13 @@ async function refreshOpenTrades() {
   });
 }
 
-async function refreshTradeHistory() {
-  const trades = await fetchJSON(`${API}/trades?limit=50`);
+async function refreshTradeHistory(sym) {
+  let trades;
+  try { trades = await fetchJSON(`${API}/trades?symbol=${encodeURIComponent(sym)}&limit=50`); }
+  catch { return; }
+
   const tbody = document.querySelector('#trade-table tbody');
   tbody.innerHTML = '';
-
   if (!trades.length) {
     tbody.innerHTML = '<tr><td colspan="10" class="empty-msg" style="padding:12px">No trades yet</td></tr>';
     return;
@@ -193,30 +287,10 @@ async function refreshTradeHistory() {
   });
 }
 
-async function refreshLogs() {
-  const logs = await fetchJSON(`${API}/logs?limit=60`);
-  const container = document.getElementById('log-container');
-  container.innerHTML = '';
-
-  // API returns newest first; show oldest → newest so latest is at the bottom.
-  const orderedLogs = [...logs].reverse();
-
-  orderedLogs.forEach(l => {
-    const ts = fmtTs(l.ts);
-    container.innerHTML += `
-      <div class="log-entry">
-        <span class="log-ts">${ts}</span>
-        <span class="log-level-${l.level}">[${l.level}]</span>
-        <span>${escHtml(l.message)}</span>
-      </div>`;
-  });
-
-  // Always keep the viewport on the most recent event.
-  container.scrollTop = container.scrollHeight;
-}
-
-async function refreshMarketContext() {
-  const ctx = await fetchJSON(`${API}/market/context?limit=120`);
+async function refreshMarketContext(sym) {
+  let ctx;
+  try { ctx = await fetchJSON(`${API}/market/context?symbol=${encodeURIComponent(sym)}&limit=120`); }
+  catch { return; }
   if (!ctx.ok || !ctx.candles || !ctx.candles.length) return;
 
   const labels = ctx.candles.map(c => fmtTs(c.ts));
@@ -226,76 +300,31 @@ async function refreshMarketContext() {
   const emaTrend = ctx.candles.map(c => c.ema_trend);
   const ema200 = ctx.candles.map(c => c.ema_200);
 
-  const target = ctx.target_band?.long || null;
-  const targetUpper = target ? new Array(close.length).fill(target.high) : null;
-  const targetLower = target ? new Array(close.length).fill(target.low) : null;
+  const longTarget  = ctx.target_band?.long  || null;
+  const shortTarget = ctx.target_band?.short || null;
+  const longUpper  = longTarget  ? new Array(close.length).fill(longTarget.high)  : null;
+  const longLower  = longTarget  ? new Array(close.length).fill(longTarget.low)   : null;
+  const shortUpper = shortTarget ? new Array(close.length).fill(shortTarget.high) : null;
+  const shortLower = shortTarget ? new Array(close.length).fill(shortTarget.low)  : null;
 
   const datasets = [
-    {
-      label: 'Price',
-      data: close,
-      borderColor: '#f0b90b',
-      borderWidth: 2,
-      pointRadius: 0,
-      tension: 0.2,
-    },
-    {
-      label: 'EMA9',
-      data: emaFast,
-      borderColor: '#3fb950',
-      borderWidth: 1.6,
-      pointRadius: 0,
-      tension: 0.2,
-    },
-    {
-      label: 'EMA21',
-      data: emaSlow,
-      borderColor: '#388bfd',
-      borderWidth: 1.4,
-      pointRadius: 0,
-      tension: 0.2,
-    },
-    {
-      label: 'EMA55',
-      data: emaTrend,
-      borderColor: '#f97316',
-      borderWidth: 1.2,
-      pointRadius: 0,
-      tension: 0.2,
-    },
-    {
-      label: 'EMA200',
-      data: ema200,
-      borderColor: '#8b949e',
-      borderWidth: 1,
-      pointRadius: 0,
-      tension: 0.2,
-    },
+    { label: 'Price',  data: close,    borderColor: '#f0b90b', borderWidth: 2,   pointRadius: 0, tension: 0.2 },
+    { label: 'EMA9',   data: emaFast,  borderColor: '#3fb950', borderWidth: 1.6, pointRadius: 0, tension: 0.2 },
+    { label: 'EMA21',  data: emaSlow,  borderColor: '#388bfd', borderWidth: 1.4, pointRadius: 0, tension: 0.2 },
+    { label: 'EMA55',  data: emaTrend, borderColor: '#f97316', borderWidth: 1.2, pointRadius: 0, tension: 0.2 },
+    { label: 'EMA200', data: ema200,   borderColor: '#8b949e', borderWidth: 1,   pointRadius: 0, tension: 0.2 },
   ];
 
-  if (targetUpper && targetLower) {
+  if (longUpper && longLower) {
     datasets.push(
-      {
-        // Upper boundary – fill anchor only, hidden from legend
-        label: 'Target Zone Upper',
-        data: targetUpper,
-        borderColor: 'rgba(63,185,80,0.4)',
-        backgroundColor: 'rgba(63,185,80,0.12)',
-        borderWidth: 1,
-        borderDash: [4, 4],
-        pointRadius: 0,
-        fill: false,
-      },
-      {
-        label: 'Long Target Zone',
-        data: targetLower,
-        borderColor: 'rgba(63,185,80,0.4)',
-        backgroundColor: 'rgba(63,185,80,0.12)',
-        borderWidth: 1,
-        borderDash: [4, 4],
-        pointRadius: 0,
-        fill: '-1',
-      }
+      { label: 'Long Zone Upper', data: longUpper, borderColor: 'rgba(63,185,80,0.4)',  backgroundColor: 'rgba(63,185,80,0.12)',  borderWidth: 1, borderDash: [4,4], pointRadius: 0, fill: false },
+      { label: 'Long Target Zone', data: longLower, borderColor: 'rgba(63,185,80,0.4)', backgroundColor: 'rgba(63,185,80,0.12)',  borderWidth: 1, borderDash: [4,4], pointRadius: 0, fill: '-1' }
+    );
+  }
+  if (shortUpper && shortLower) {
+    datasets.push(
+      { label: 'Short Zone Upper', data: shortUpper, borderColor: 'rgba(248,81,73,0.45)', backgroundColor: 'rgba(248,81,73,0.12)', borderWidth: 1, borderDash: [4,4], pointRadius: 0, fill: false },
+      { label: 'Short Target Zone', data: shortLower, borderColor: 'rgba(248,81,73,0.45)', backgroundColor: 'rgba(248,81,73,0.12)', borderWidth: 1, borderDash: [4,4], pointRadius: 0, fill: '-1' }
     );
   }
 
@@ -307,8 +336,7 @@ async function refreshMarketContext() {
       legend: {
         labels: {
           color: '#e6edf3',
-          // Hide the upper-boundary helper; only show 'Long Target Zone'
-          filter: (item) => item.text !== 'Target Zone Upper',
+          filter: item => !['Long Zone Upper','Short Zone Upper'].includes(item.text),
         },
       },
     },
@@ -326,8 +354,28 @@ async function refreshMarketContext() {
     priceChart.update('none');
   }
 
-  renderChecks('long-checks', ctx.long_checks || {});
+  renderChecks('long-checks',  ctx.long_checks  || {});
   renderChecks('short-checks', ctx.short_checks || {});
+}
+
+// ── Activity log (common) ─────────────────────────────────────────────────
+
+async function refreshLogs() {
+  let logs;
+  try { logs = await fetchJSON(`${API}/logs?limit=60`); } catch { return; }
+
+  const container = document.getElementById('log-container');
+  container.innerHTML = '';
+  const orderedLogs = [...logs].reverse();
+  orderedLogs.forEach(l => {
+    container.innerHTML += `
+      <div class="log-entry">
+        <span class="log-ts">${fmtTs(l.ts)}</span>
+        <span class="log-level-${l.level}">[${l.level}]</span>
+        <span>${escHtml(l.message)}</span>
+      </div>`;
+  });
+  container.scrollTop = container.scrollHeight;
 }
 
 // ── Bot control ────────────────────────────────────────────────────────────
@@ -352,21 +400,19 @@ async function stopBot() {
 
 async function clearLogs() {
   if (!confirm('Clear all activity log entries?')) return;
-
   try {
     const r = await fetch(`${API}/logs/clear`, { method: 'POST' });
     const data = await r.json();
-    if (!r.ok || !data.ok) {
-      alert(data.message || 'Could not clear activity log');
-      return;
-    }
+    if (!r.ok || !data.ok) { alert(data.message || 'Could not clear log'); return; }
     await refreshLogs();
-  } catch (e) {
-    alert('Could not reach API server: ' + e.message);
-  }
+  } catch (e) { alert('Could not reach API server: ' + e.message); }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
+
+function formatPrice(value) {
+  return `$${Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
 
 function signalClass(sig) {
   if (sig === 'LONG')  return 'text-green';
@@ -375,35 +421,31 @@ function signalClass(sig) {
 }
 
 function setupClass(hint) {
-  if (hint === 'LONG_READY') return 'text-green';
+  if (hint === 'LONG_READY')  return 'text-green';
   if (hint === 'SHORT_READY') return 'text-red';
-  if (hint === 'COOLDOWN') return 'text-blue';
+  if (hint === 'COOLDOWN')    return 'text-blue';
   return 'text-gold';
 }
 
 function modeClass(mode) {
   if (mode === 'papertrading') return 'text-blue';
-  if (mode === 'realtrading') return 'text-green';
+  if (mode === 'realtrading')  return 'text-green';
   return 'text-gold';
 }
 
 function renderChecks(containerId, checks) {
   const el = document.getElementById(containerId);
   if (!el) return;
-
   const items = Object.entries(checks);
   if (!items.length) {
     el.innerHTML = '<li><span>No data</span><span class="check-badge check-badge--no">N/A</span></li>';
     return;
   }
-
-  el.innerHTML = items
-    .map(([name, ok]) => {
-      const cls = ok ? 'check-badge--ok' : 'check-badge--no';
-      const text = ok ? 'OK' : 'WAIT';
-      return `<li><span>${escHtml(name)}</span><span class="check-badge ${cls}">${text}</span></li>`;
-    })
-    .join('');
+  el.innerHTML = items.map(([name, ok]) => {
+    const cls  = ok ? 'check-badge--ok' : 'check-badge--no';
+    const text = ok ? 'OK' : 'WAIT';
+    return `<li><span>${escHtml(name)}</span><span class="check-badge ${cls}">${text}</span></li>`;
+  }).join('');
 }
 
 function statusBadge(status) {
@@ -413,14 +455,9 @@ function statusBadge(status) {
 
 function fmtTs(ts) {
   if (!ts) return '–';
-
-  // Normalize timestamps from backend/SQLite:
-  // - If timezone is present (Z or ±HH:MM), keep as-is.
-  // - If timezone is missing, treat as UTC to avoid local/UTC drift.
   let normalized = String(ts).trim().replace(' ', 'T');
   const hasTz = /(?:Z|[+-]\d{2}:\d{2})$/i.test(normalized);
   if (!hasTz) normalized += 'Z';
-
   const d = new Date(normalized);
   if (isNaN(d)) return ts;
   return d.toLocaleString('en-US', {

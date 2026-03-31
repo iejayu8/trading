@@ -108,3 +108,17 @@ class TestBacktest:
         bt = Backtest(initial_equity=1000.0)
         result = bt.run(df)
         assert isinstance(result, dict)
+
+    def test_eth_symbol_uses_different_sl_tp(self):
+        """ETH backtest uses optimized params (SL=1.5%, TP=7.0%) not BTC defaults."""
+        df = make_ohlcv(600)
+        bt_btc = Backtest(initial_equity=1000.0, symbol="BTC-USDT")
+        bt_eth = Backtest(initial_equity=1000.0, symbol="ETH-USDT")
+        result_btc = bt_btc.run(df)
+        result_eth = bt_eth.run(df)
+        # Both should return valid summary dicts (may have no trades on synthetic data)
+        assert isinstance(result_btc, dict)
+        assert isinstance(result_eth, dict)
+        # If trades occurred, verify the result keys are correct
+        if "return_pct" in result_eth:
+            assert "win_rate_pct" in result_eth

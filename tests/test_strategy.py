@@ -21,6 +21,7 @@ from strategy import (
     calculate_sl_tp,
     compute_indicators,
     generate_signal,
+    reset_signal_state as strategy_reset_signal_state,
 )
 
 
@@ -103,7 +104,7 @@ def make_short_trigger_ohlcv(n: int = 700) -> pd.DataFrame:
 
 def reset_signal_state():
     """Reset the module-level cooldown tracker between tests."""
-    _last_signal_bar["bar"] = -SIGNAL_COOLDOWN
+    strategy_reset_signal_state()  # clears all symbols
 
 
 # ── compute_indicators ────────────────────────────────────────────────────────
@@ -171,7 +172,7 @@ class TestGenerateSignal:
         reset_signal_state()
         df = make_ohlcv(600, trend="up")
         df = compute_indicators(df)
-        signals = [generate_signal(df.iloc[: i + 1]) for i in range(220, len(df))]
+        signals = [generate_signal(df.iloc[: i + 1], symbol="BTC-USDT") for i in range(220, len(df))]
         assert Signal.LONG in signals
 
     def test_short_signal_on_downtrend(self):
@@ -185,15 +186,40 @@ class TestGenerateSignal:
         reset_signal_state()
         df = make_short_trigger_ohlcv()
         df = compute_indicators(df)
-        signals = [generate_signal(df.iloc[: i + 1]) for i in range(220, len(df))]
+        signals = [generate_signal(df.iloc[: i + 1], symbol="BTC-USDT") for i in range(220, len(df))]
         assert Signal.SHORT in signals
 
     def test_returns_valid_value(self):
         reset_signal_state()
         df = make_ohlcv(400)
         df = compute_indicators(df)
-        sig = generate_signal(df)
+        sig = generate_signal(df, symbol="BTC-USDT")
         assert sig in (Signal.LONG, Signal.SHORT, Signal.NONE)
+
+    def test_per_symbol_cooldown_independent(self):
+        """Cooldown applies per symbol: BTC can be blocked while ETH still signals."""
+        reset_signal_state()
+        df = make_ohlcv(600, trend="up")
+        df = compute_indicators(df)
+
+        trigger_idx = None
+        for i in range(220, len(df)):
+            window = df.iloc[: i + 1]
+            if generate_signal(window, symbol="BTC-USDT") == Signal.LONG:
+                trigger_idx = i
+                break
+
+        if trigger_idx is None:
+            pytest.fail("Expected to find at least one LONG signal for BTC-USDT")
+
+        window = df.iloc[: trigger_idx + 1]
+        # Same symbol is immediately in cooldown on the same bar.
+        assert generate_signal(window, symbol="BTC-USDT") == Signal.NONE
+        # Different symbol should remain independent and still be able to signal.
+        assert generate_signal(window, symbol="ETH-USDT") == Signal.LONG
+
+        assert _last_signal_bar["BTC-USDT"] == trigger_idx
+        assert _last_signal_bar["ETH-USDT"] == trigger_idx
 
 
 # ── calculate_position_size ───────────────────────────────────────────────────
@@ -232,12 +258,12 @@ class TestCalculateSlTp:
         assert tp < 40000
 
     def test_rr_ratio(self):
-        """R/R should be ≥ 2:1 (current config gives ~2.25:1)."""
+        """R/R should be ≥ 1.5:1 (v7 config gives ~1.6:1 with higher win rate)."""
         entry = 40000
         sl, tp = calculate_sl_tp(entry, Signal.LONG)
         risk   = entry - sl
         reward = tp - entry
-        assert reward / risk >= 2.0  # at least 2:1
+        assert reward / risk >= 1.5  # at least 1.5:1
 
     def test_stop_loss_pct_accuracy(self):
         entry = 50000
@@ -250,3 +276,19 @@ class TestCalculateSlTp:
         _, tp = calculate_sl_tp(entry, Signal.LONG)
         actual_pct = (tp - entry) / entry
         assert abs(actual_pct - config.TAKE_PROFIT_PCT) < 0.0001
+
+    def test_eth_custom_sl_tp(self):
+        """ETH params produce wider TP and tighter SL than default."""
+        entry = 2000.0
+        sl_eth, tp_eth = calculate_sl_tp(entry, Signal.LONG, stop_loss_pct=0.015, take_profit_pct=0.070)
+        sl_btc, tp_btc = calculate_sl_tp(entry, Signal.LONG)  # BTC defaults
+        assert sl_eth > sl_btc   # ETH SL is closer to entry (tighter)
+        assert tp_eth > tp_btc   # ETH TP is further from entry (wider)
+
+    def test_custom_sl_tp_rr(self):
+        """ETH 1.5%/7.0% params give a 4.67:1 R/R ratio."""
+        entry = 2000.0
+        sl, tp = calculate_sl_tp(entry, Signal.LONG, stop_loss_pct=0.015, take_profit_pct=0.070)
+        risk   = entry - sl
+        reward = tp - entry
+        assert reward / risk >= 4.0  # ≥ 4:1 for ETH params

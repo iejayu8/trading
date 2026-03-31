@@ -96,14 +96,23 @@ class TestBotRobustness:
     def test_reconciliation_closes_stale_local_open_trades(self, monkeypatch):
         bot = TradingBot(symbol="BTC-USDT")
 
-        closed_ids = []
-        monkeypatch.setattr(db, "close_trade", lambda trade_id, exit_price, pnl: closed_ids.append(trade_id))
+        closed_calls = []
+        monkeypatch.setattr(
+            db,
+            "close_trade",
+            lambda trade_id, exit_price, pnl: closed_calls.append((trade_id, exit_price, pnl)),
+        )
 
-        local = [{"id": 10}, {"id": 11}]
+        local = [
+            {"id": 10, "direction": "LONG", "entry_price": 90.0, "size": 1.0},
+            {"id": 11, "direction": "SHORT", "entry_price": 110.0, "size": 2.0},
+        ]
         out = bot._reconcile_local_open_trades(local, exchange_has_position=False, mark_price=100.0)
 
         assert out == []
-        assert closed_ids == [10, 11]
+        assert [call[0] for call in closed_calls] == [10, 11]
+        assert [call[1] for call in closed_calls] == [100.0, 100.0]
+        assert [call[2] for call in closed_calls] == [10.0, 20.0]
 
     def test_paper_mode_skips_exchange_for_entry(self, monkeypatch):
         import config
@@ -134,3 +143,89 @@ class TestBotRobustness:
         assert opened == [1]
         assert called["set_leverage"] == 0
         assert called["place_order"] == 0
+
+    def test_real_mode_close_failure_keeps_trade_open(self, monkeypatch):
+        import config
+
+        monkeypatch.setattr(config, "TRADING_MODE", "realtrading")
+        bot = TradingBot(symbol="BTC-USDT")
+
+        closed_calls = []
+        monkeypatch.setattr(db, "close_trade", lambda *a, **k: closed_calls.append((a, k)))
+
+        def fail_close(*args, **kwargs):
+            raise RuntimeError("close failed")
+
+        monkeypatch.setattr(bot._client, "place_order", fail_close)
+
+        trade = {
+            "id": 101,
+            "direction": Signal.LONG,
+            "entry_price": 100.0,
+            "sl_price": 95.0,
+            "tp_price": 105.0,
+            "size": 1.0,
+        }
+        bot._manage_open_trades([trade], current_price=106.0)
+
+        # Must stay open locally when exchange close fails.
+        assert closed_calls == []
+
+    def test_real_mode_close_rejected_keeps_trade_open(self, monkeypatch):
+        import config
+
+        monkeypatch.setattr(config, "TRADING_MODE", "realtrading")
+        bot = TradingBot(symbol="BTC-USDT")
+
+        closed_calls = []
+        monkeypatch.setattr(db, "close_trade", lambda *a, **k: closed_calls.append((a, k)))
+
+        monkeypatch.setattr(
+            bot._client,
+            "place_order",
+            lambda *args, **kwargs: {"code": "51001", "msg": "rejected"},
+        )
+
+        trade = {
+            "id": 102,
+            "direction": Signal.LONG,
+            "entry_price": 100.0,
+            "sl_price": 95.0,
+            "tp_price": 105.0,
+            "size": 1.0,
+        }
+        bot._manage_open_trades([trade], current_price=106.0)
+
+        # Must stay open locally when exchange rejects close.
+        assert closed_calls == []
+
+    def test_real_mode_close_success_closes_trade_locally(self, monkeypatch):
+        import config
+
+        monkeypatch.setattr(config, "TRADING_MODE", "realtrading")
+        bot = TradingBot(symbol="BTC-USDT")
+
+        closed_calls = []
+        monkeypatch.setattr(
+            db,
+            "close_trade",
+            lambda trade_id, exit_price, pnl: closed_calls.append((trade_id, exit_price, pnl)),
+        )
+        monkeypatch.setattr(
+            bot._client,
+            "place_order",
+            lambda *args, **kwargs: {"code": "0", "msg": "success"},
+        )
+
+        trade = {
+            "id": 103,
+            "direction": Signal.LONG,
+            "entry_price": 100.0,
+            "sl_price": 95.0,
+            "tp_price": 105.0,
+            "size": 1.0,
+        }
+        bot._manage_open_trades([trade], current_price=106.0)
+
+        assert len(closed_calls) == 1
+        assert closed_calls[0][0] == 103

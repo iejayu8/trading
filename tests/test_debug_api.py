@@ -18,6 +18,14 @@ except ImportError:
     from backend.exchange import BloFinClient
 
 
+def _mask(value: str, visible: int = 4) -> str:
+    if not value:
+        return "<empty>"
+    if len(value) <= visible * 2:
+        return "*" * len(value)
+    return f"{value[:visible]}...{value[-visible:]}"
+
+
 def test_raw_api_response():
     """Test to see the raw API response from BloFin."""
     print("\n" + "=" * 70)
@@ -29,8 +37,11 @@ def test_raw_api_response():
     # Check credentials
     print("\n1. CREDENTIALS CHECK:")
     print(f"   API Key: {'✓' if config.BLOFIN_API_KEY else '✗'} ({len(config.BLOFIN_API_KEY)} chars)")
+    print(f"   API Key (masked): {_mask(config.BLOFIN_API_KEY)}")
     print(f"   API Secret: {'✓' if config.get_api_secret() else '✗'} ({len(config.get_api_secret())} chars)")
+    print(f"   API Secret (masked): {_mask(config.get_api_secret())}")
     print(f"   Passphrase: {'✓' if config.BLOFIN_API_PASSPHRASE else '✗'} ({len(config.BLOFIN_API_PASSPHRASE)} chars)")
+    print(f"   Passphrase (masked): {_mask(config.BLOFIN_API_PASSPHRASE)}")
     
     # Get raw balance response
     print("\n2. BALANCE ENDPOINT RESPONSE:")

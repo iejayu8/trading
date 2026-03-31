@@ -1,3 +1,0 @@
-"""
-Backend trading bot module.
-"""
