@@ -40,6 +40,10 @@ import webview
 # - PyInstaller onefile: temporary extraction folder (_MEIPASS)
 APP_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 
+# Ensure bundled resources are importable when running as a frozen executable.
+if APP_DIR not in sys.path:
+    sys.path.insert(0, APP_DIR)
+
 # USER_DIR points to where the launcher lives:
 # - source run: repository root
 # - PyInstaller exe: directory containing the .exe
@@ -55,7 +59,7 @@ def _resolve_python() -> str:
 
     Priority:
     1. The project's own .venv (works when running from source).
-    2. sys.executable (correct when packaged with PyInstaller as an .exe).
+    2. sys.executable (fallback for non-standard local setups).
     """
     if not getattr(sys, "frozen", False):
         venv_python = os.path.join(APP_DIR, ".venv", "Scripts", "python.exe")
@@ -147,6 +151,8 @@ ERROR_HTML = """
 # ── Backend management ────────────────────────────────────────────────────────
 
 _backend_proc: subprocess.Popen | None = None
+_backend_thread: threading.Thread | None = None
+_backend_error: str | None = None
 
 
 def _load_credentials() -> dict[str, str]:
@@ -165,16 +171,37 @@ def _load_credentials() -> dict[str, str]:
     return env
 
 
-def start_backend() -> subprocess.Popen:
-    """Launch the Flask backend as a child process."""
-    global _backend_proc
+def _run_embedded_backend() -> None:
+    """Run the backend inside this process (used in frozen executable mode)."""
+    global _backend_error
+    try:
+        backend_dir = os.path.join(APP_DIR, "backend")
+        if backend_dir not in sys.path:
+            sys.path.insert(0, backend_dir)
 
+        from backend import app as backend_app_module
+        from backend import database as db
+
+        db.init_db()
+        backend_app_module.app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False)
+    except Exception as exc:  # pragma: no cover - only exercised in packaged app runtime
+        _backend_error = str(exc)
+
+
+def start_backend() -> subprocess.Popen | None:
+    """Launch the Flask backend (thread in frozen mode, subprocess in source mode)."""
+    global _backend_proc, _backend_thread
+
+    credentials = _load_credentials()
     env = os.environ.copy()
-    env.update(_load_credentials())
+    env.update(credentials)
 
-    # When packaged with PyInstaller the real Python interpreter is embedded;
-    # sys.executable points to the .exe wrapper, so we use it to spawn the
-    # backend script directly – Python will handle it via the bundled runtime.
+    if getattr(sys, "frozen", False):
+        os.environ.update(credentials)
+        _backend_thread = threading.Thread(target=_run_embedded_backend, daemon=True)
+        _backend_thread.start()
+        return None
+
     _backend_proc = subprocess.Popen(
         [_resolve_python(), BACKEND_SCRIPT],
         cwd=os.path.join(APP_DIR, "backend"),
@@ -201,7 +228,7 @@ def wait_for_backend(timeout: int = 30) -> bool:
 
 
 def stop_backend() -> None:
-    """Terminate the backend process if it is still running."""
+    """Terminate the backend subprocess if it is still running."""
     if _backend_proc and _backend_proc.poll() is None:
         _backend_proc.terminate()
         try:
@@ -225,7 +252,9 @@ def _boot_and_load(window: webview.Window) -> None:
         window.load_url(BACKEND_URL)
     else:
         proc_died = _backend_proc and _backend_proc.poll() is not None
-        if proc_died:
+        if _backend_error:
+            msg = f"The backend crashed during startup: {_backend_error}"
+        elif proc_died:
             msg = (
                 "The backend process exited unexpectedly. "
                 "Check that all Python dependencies are installed."

@@ -24,15 +24,34 @@ from __future__ import annotations
 
 import os
 import threading
+from typing import TYPE_CHECKING
 
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
-import config
-import database as db
-from bot import TradingBot
-from exchange import BloFinClient
-from strategy import compute_indicators, get_signal_checks, get_signal_diagnostics
+try:
+    from . import config
+    from . import database as db
+    from .bot import TradingBot
+    from .exchange import BloFinClient
+    from .strategy import compute_indicators, get_signal_checks, get_signal_diagnostics
+except ImportError:
+    import importlib
+
+    config = importlib.import_module("config")
+    db = importlib.import_module("database")
+    TradingBot = importlib.import_module("bot").TradingBot
+    BloFinClient = importlib.import_module("exchange").BloFinClient
+    _strategy = importlib.import_module("strategy")
+    compute_indicators = _strategy.compute_indicators
+    get_signal_checks = _strategy.get_signal_checks
+    get_signal_diagnostics = _strategy.get_signal_diagnostics
+
+if TYPE_CHECKING:
+    try:
+        from .bot import TradingBot as TradingBotType
+    except ImportError:
+        from bot import TradingBot as TradingBotType
 
 _FRONTEND_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
 
@@ -62,18 +81,18 @@ def static_files(filename):
 # ── Multi-bot registry ────────────────────────────────────────────────────────
 # One TradingBot instance per supported symbol, lazily created.
 
-_bots: dict[str, TradingBot] = {}
+_bots: dict[str, TradingBotType] = {}
 _bots_lock = threading.Lock()
 
 
-def _get_bot(symbol: str) -> TradingBot:
+def _get_bot(symbol: str) -> TradingBotType:
     with _bots_lock:
         if symbol not in _bots:
             _bots[symbol] = TradingBot(symbol=symbol)
     return _bots[symbol]
 
 
-def _all_bots() -> list[TradingBot]:
+def _all_bots() -> list[TradingBotType]:
     return [_get_bot(s) for s in config.SUPPORTED_SYMBOLS]
 
 

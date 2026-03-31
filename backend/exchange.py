@@ -16,7 +16,12 @@ from typing import Any
 
 import requests
 
-import config
+try:
+    from . import config
+except ImportError:
+    import importlib
+
+    config = importlib.import_module("config")
 
 
 class BloFinClient:

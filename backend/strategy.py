@@ -62,7 +62,12 @@ from __future__ import annotations
 import pandas as pd
 import numpy as np
 
-import config
+try:
+    from . import config
+except ImportError:
+    import importlib
+
+    config = importlib.import_module("config")
 
 SIGNAL_COOLDOWN = 24
 MIN_BARS_REQUIRED = 200

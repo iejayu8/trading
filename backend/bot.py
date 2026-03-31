@@ -14,18 +14,33 @@ from uuid import uuid4
 
 import pandas as pd
 
-import config
-import database as db
-from exchange import BloFinClient
-from strategy import (
-    Signal,
-    calculate_position_size,
-    calculate_sl_tp,
-    compute_indicators,
-    get_signal_diagnostics,
-    generate_signal,
-    reset_signal_state,
-)
+try:
+    from . import config
+    from . import database as db
+    from .exchange import BloFinClient
+    from .strategy import (
+        Signal,
+        calculate_position_size,
+        calculate_sl_tp,
+        compute_indicators,
+        get_signal_diagnostics,
+        generate_signal,
+        reset_signal_state,
+    )
+except ImportError:
+    import importlib
+
+    config = importlib.import_module("config")
+    db = importlib.import_module("database")
+    BloFinClient = importlib.import_module("exchange").BloFinClient
+    _strategy = importlib.import_module("strategy")
+    Signal = _strategy.Signal
+    calculate_position_size = _strategy.calculate_position_size
+    calculate_sl_tp = _strategy.calculate_sl_tp
+    compute_indicators = _strategy.compute_indicators
+    get_signal_diagnostics = _strategy.get_signal_diagnostics
+    generate_signal = _strategy.generate_signal
+    reset_signal_state = _strategy.reset_signal_state
 
 
 class TradingBot:
