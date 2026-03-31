@@ -143,3 +143,89 @@ class TestBotRobustness:
         assert opened == [1]
         assert called["set_leverage"] == 0
         assert called["place_order"] == 0
+
+    def test_real_mode_close_failure_keeps_trade_open(self, monkeypatch):
+        import config
+
+        monkeypatch.setattr(config, "TRADING_MODE", "realtrading")
+        bot = TradingBot(symbol="BTC-USDT")
+
+        closed_calls = []
+        monkeypatch.setattr(db, "close_trade", lambda *a, **k: closed_calls.append((a, k)))
+
+        def fail_close(*args, **kwargs):
+            raise RuntimeError("close failed")
+
+        monkeypatch.setattr(bot._client, "place_order", fail_close)
+
+        trade = {
+            "id": 101,
+            "direction": Signal.LONG,
+            "entry_price": 100.0,
+            "sl_price": 95.0,
+            "tp_price": 105.0,
+            "size": 1.0,
+        }
+        bot._manage_open_trades([trade], current_price=106.0)
+
+        # Must stay open locally when exchange close fails.
+        assert closed_calls == []
+
+    def test_real_mode_close_rejected_keeps_trade_open(self, monkeypatch):
+        import config
+
+        monkeypatch.setattr(config, "TRADING_MODE", "realtrading")
+        bot = TradingBot(symbol="BTC-USDT")
+
+        closed_calls = []
+        monkeypatch.setattr(db, "close_trade", lambda *a, **k: closed_calls.append((a, k)))
+
+        monkeypatch.setattr(
+            bot._client,
+            "place_order",
+            lambda *args, **kwargs: {"code": "51001", "msg": "rejected"},
+        )
+
+        trade = {
+            "id": 102,
+            "direction": Signal.LONG,
+            "entry_price": 100.0,
+            "sl_price": 95.0,
+            "tp_price": 105.0,
+            "size": 1.0,
+        }
+        bot._manage_open_trades([trade], current_price=106.0)
+
+        # Must stay open locally when exchange rejects close.
+        assert closed_calls == []
+
+    def test_real_mode_close_success_closes_trade_locally(self, monkeypatch):
+        import config
+
+        monkeypatch.setattr(config, "TRADING_MODE", "realtrading")
+        bot = TradingBot(symbol="BTC-USDT")
+
+        closed_calls = []
+        monkeypatch.setattr(
+            db,
+            "close_trade",
+            lambda trade_id, exit_price, pnl: closed_calls.append((trade_id, exit_price, pnl)),
+        )
+        monkeypatch.setattr(
+            bot._client,
+            "place_order",
+            lambda *args, **kwargs: {"code": "0", "msg": "success"},
+        )
+
+        trade = {
+            "id": 103,
+            "direction": Signal.LONG,
+            "entry_price": 100.0,
+            "sl_price": 95.0,
+            "tp_price": 105.0,
+            "size": 1.0,
+        }
+        bot._manage_open_trades([trade], current_price=106.0)
+
+        assert len(closed_calls) == 1
+        assert closed_calls[0][0] == 103

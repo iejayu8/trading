@@ -5,7 +5,7 @@ Validate credentials format for BloFin sub-accounts.
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
+sys.path.insert(0, str(Path(__file__).parent / "backend"))
 
 try:
     import config
@@ -13,16 +13,24 @@ except ImportError:
     from backend import config
 
 
+def _mask(value: str, visible: int = 4) -> str:
+    if not value:
+        return "<empty>"
+    if len(value) <= visible * 2:
+        return "*" * len(value)
+    return f"{value[:visible]}...{value[-visible:]}"
+
+
 print("\n" + "=" * 70)
 print("CREDENTIALS VALIDATION FOR BLOFIN SUB-ACCOUNTS")
 print("=" * 70)
 
 print("\nCURRENT LOADED VALUES:")
-print(f"  API Key: {config.BLOFIN_API_KEY}")
+print(f"  API Key: {_mask(config.BLOFIN_API_KEY)}")
 print(f"  API Key Length: {len(config.BLOFIN_API_KEY)} chars")
-print(f"  Secret (decoded): {config.get_api_secret()}")
+print(f"  Secret (decoded): {_mask(config.get_api_secret())}")
 print(f"  Secret Length: {len(config.get_api_secret())} chars")
-print(f"  Passphrase: {config.BLOFIN_API_PASSPHRASE}")
+print(f"  Passphrase: {_mask(config.BLOFIN_API_PASSPHRASE)}")
 print(f"  Passphrase Length: {len(config.BLOFIN_API_PASSPHRASE)} chars")
 
 print("\nCHECKLIST:")

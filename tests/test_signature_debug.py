@@ -16,6 +16,14 @@ except ImportError:
     from backend import config
 
 
+def _mask(value: str, visible: int = 4) -> str:
+    if not value:
+        return "<empty>"
+    if len(value) <= visible * 2:
+        return "*" * len(value)
+    return f"{value[:visible]}...{value[-visible:]}"
+
+
 def debug_signature():
     """Debug the signature generation step by step."""
     print("\n" + "=" * 70)
@@ -27,11 +35,11 @@ def debug_signature():
     passphrase = config.BLOFIN_API_PASSPHRASE
     
     print(f"\n1. CREDENTIALS:")
-    print(f"   API Key: {api_key}")
+    print(f"   API Key: {_mask(api_key)}")
     print(f"   API Key Length: {len(api_key)}")
-    print(f"   Secret (decoded): {secret}")
+    print(f"   Secret (decoded): {_mask(secret)}")
     print(f"   Secret Length: {len(secret)}")
-    print(f"   Passphrase: {passphrase}")
+    print(f"   Passphrase: {_mask(passphrase)}")
     
     # Simulate signature for a GET request
     ts = str(int(time.time() * 1000))
@@ -68,7 +76,7 @@ def debug_signature():
     print(f"\n5. SECRET KEY ANALYSIS:")
     print(f"   Secret decoded correctly: {bool(secret)}")
     print(f"   Secret is base64 safe: {all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=' for c in config._SECRET_B64)}")
-    print(f"   Secret bytes (first 20): {secret[:20]}")
+    print(f"   Secret prefix length check (first 20 chars): {len(secret[:20])}")
     
     print(f"\n6. SUGGESTIONS FOR DEBUGGING:")
     print(f"   - Check if secret needs to remain base64 encoded (not decoded)")

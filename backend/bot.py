@@ -217,9 +217,34 @@ class TradingBot:
             )
 
             if hit_sl or hit_tp:
+                reason = "TP" if hit_tp else "SL"
+                if not self.paper_trading:
+                    # Keep local state OPEN unless exchange confirms the close order.
+                    try:
+                        close_side = "sell" if direction == Signal.LONG else "buy"
+                        close_cid = f"close-{self.symbol}-{int(time.time() * 1000)}-{uuid4().hex[:8]}"
+                        resp = self._call_with_retries(
+                            self._client.place_order,
+                            self.symbol,
+                            close_side,
+                            "market",
+                            size,
+                            client_order_id=close_cid,
+                            label="close_order",
+                        )
+                        code = str(resp.get("code", "0")) if isinstance(resp, dict) else "0"
+                        if code != "0":
+                            db.log_event(
+                                f"Close order rejected for trade {trade['id']} (code={code}, msg={resp.get('msg')})",
+                                level="ERROR",
+                            )
+                            continue
+                    except Exception as exc:
+                        db.log_event(f"Close order failed for trade {trade['id']}: {exc}", level="ERROR")
+                        continue
+
                 pnl = _calc_pnl(direction, entry, current_price, size)
                 db.close_trade(trade["id"], current_price, pnl)
-                reason = "TP" if hit_tp else "SL"
                 db.log_event(
                     f"Trade {trade['id']} closed ({reason}) "
                     f"@ {current_price:.2f}  PnL={pnl:.4f} USDT"
@@ -227,15 +252,6 @@ class TradingBot:
 
                 if self.paper_trading:
                     db.log_event(f"[PAPER] Simulated close for trade {trade['id']}")
-                else:
-                    # Place close order on exchange (best-effort)
-                    try:
-                        close_side = "sell" if direction == Signal.LONG else "buy"
-                        self._client.place_order(
-                            self.symbol, close_side, "market", size
-                        )
-                    except Exception as exc:
-                        db.log_event(f"Close order failed: {exc}", level="ERROR")
 
     def _enter_trade(
         self, signal: str, price: float, equity: float

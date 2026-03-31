@@ -17,6 +17,14 @@ except ImportError:
     from backend import config
 
 
+def _mask(value: str, visible: int = 4) -> str:
+    if not value:
+        return "<empty>"
+    if len(value) <= visible * 2:
+        return "*" * len(value)
+    return f"{value[:visible]}...{value[-visible:]}"
+
+
 def test_signature_variations():
     """Test different signature combinations."""
     print("\n" + "=" * 70)
@@ -27,8 +35,8 @@ def test_signature_variations():
     raw_secret_b64 = config._SECRET_B64
     decoded_secret = config.get_api_secret()
     
-    print(f"\nRAW SECRET (from .env): {raw_secret_b64}")
-    print(f"DECODED SECRET: {decoded_secret}")
+    print(f"\nRAW SECRET (from .env): {_mask(raw_secret_b64)}")
+    print(f"DECODED SECRET: {_mask(decoded_secret)}")
     
     ts = str(int(time.time() * 1000))
     nonce = str(int(time.time() * 1000000))
