@@ -226,9 +226,12 @@ async function refreshMarketContext() {
   const emaTrend = ctx.candles.map(c => c.ema_trend);
   const ema200 = ctx.candles.map(c => c.ema_200);
 
-  const target = ctx.target_band?.long || null;
-  const targetUpper = target ? new Array(close.length).fill(target.high) : null;
-  const targetLower = target ? new Array(close.length).fill(target.low) : null;
+  const longTarget = ctx.target_band?.long || null;
+  const shortTarget = ctx.target_band?.short || null;
+  const longUpper = longTarget ? new Array(close.length).fill(longTarget.high) : null;
+  const longLower = longTarget ? new Array(close.length).fill(longTarget.low) : null;
+  const shortUpper = shortTarget ? new Array(close.length).fill(shortTarget.high) : null;
+  const shortLower = shortTarget ? new Array(close.length).fill(shortTarget.low) : null;
 
   const datasets = [
     {
@@ -273,12 +276,11 @@ async function refreshMarketContext() {
     },
   ];
 
-  if (targetUpper && targetLower) {
+  if (longUpper && longLower) {
     datasets.push(
       {
-        // Upper boundary – fill anchor only, hidden from legend
-        label: 'Target Zone Upper',
-        data: targetUpper,
+        label: 'Long Zone Upper',
+        data: longUpper,
         borderColor: 'rgba(63,185,80,0.4)',
         backgroundColor: 'rgba(63,185,80,0.12)',
         borderWidth: 1,
@@ -288,9 +290,34 @@ async function refreshMarketContext() {
       },
       {
         label: 'Long Target Zone',
-        data: targetLower,
+        data: longLower,
         borderColor: 'rgba(63,185,80,0.4)',
         backgroundColor: 'rgba(63,185,80,0.12)',
+        borderWidth: 1,
+        borderDash: [4, 4],
+        pointRadius: 0,
+        fill: '-1',
+      }
+    );
+  }
+
+  if (shortUpper && shortLower) {
+    datasets.push(
+      {
+        label: 'Short Zone Upper',
+        data: shortUpper,
+        borderColor: 'rgba(248,81,73,0.45)',
+        backgroundColor: 'rgba(248,81,73,0.12)',
+        borderWidth: 1,
+        borderDash: [4, 4],
+        pointRadius: 0,
+        fill: false,
+      },
+      {
+        label: 'Short Target Zone',
+        data: shortLower,
+        borderColor: 'rgba(248,81,73,0.45)',
+        backgroundColor: 'rgba(248,81,73,0.12)',
         borderWidth: 1,
         borderDash: [4, 4],
         pointRadius: 0,
@@ -307,8 +334,8 @@ async function refreshMarketContext() {
       legend: {
         labels: {
           color: '#e6edf3',
-          // Hide the upper-boundary helper; only show 'Long Target Zone'
-          filter: (item) => item.text !== 'Target Zone Upper',
+          // Hide helper boundary datasets from legend.
+          filter: (item) => !['Long Zone Upper', 'Short Zone Upper'].includes(item.text),
         },
       },
     },
