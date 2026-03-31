@@ -50,7 +50,7 @@ VOLUME_SMA_PERIOD: int = 20
 LEVERAGE: int = int(os.getenv("TRADING_LEVERAGE", "5"))
 RISK_PER_TRADE: float = float(os.getenv("RISK_PER_TRADE", "0.01"))  # 1 % of equity
 STOP_LOSS_PCT: float = 0.020   # 2.0 % from entry
-TAKE_PROFIT_PCT: float = 0.045  # 4.5 % from entry (~2.25:1 R/R)
+TAKE_PROFIT_PCT: float = 0.055  # 5.5 % from entry (~2.75:1 R/R)
 MAX_DAILY_LOSS_PCT: float = 0.03  # 3 % daily drawdown guard
 
 # Supported symbols (scalable)
