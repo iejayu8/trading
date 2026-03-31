@@ -93,32 +93,7 @@
             <tbody></tbody>
           </table>
         </section>
-
-        <!-- Open Positions -->
-        <section class="panel">
-          <h2 class="panel__title">Open Positions</h2>
-          <div id="open-trades-container">
-            <p class="empty-msg">No open positions</p>
-          </div>
-        </section>
       </div>
-
-      <!-- Trade History -->
-      <section class="panel">
-        <h2 class="panel__title">Trade History</h2>
-        <div class="table-scroll">
-          <table class="data-table" id="trade-table">
-            <thead>
-              <tr>
-                <th>#</th><th>Direction</th><th>Entry</th><th>Exit</th>
-                <th>Size</th><th>SL</th><th>TP</th>
-                <th>PnL (USDT)</th><th>Status</th><th>Opened</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </section>
 
       <!-- Market Context -->
       <section class="panel">
@@ -141,6 +116,31 @@
       </section>
 
     </div><!-- /symbol-panel -->
+
+    <!-- ── Open Positions (common) ───────────────────────────────────────── -->
+    <section class="panel">
+      <h2 class="panel__title">Open Positions <span class="tag tag--info">All Symbols</span></h2>
+      <div id="open-trades-container">
+        <p class="empty-msg">No open positions</p>
+      </div>
+    </section>
+
+    <!-- ── Trade History (common) ────────────────────────────────────────── -->
+    <section class="panel">
+      <h2 class="panel__title">Trade History <span class="tag tag--info">All Symbols</span></h2>
+      <div class="table-scroll">
+        <table class="data-table" id="trade-table">
+          <thead>
+            <tr>
+              <th>#</th><th>Direction</th><th>Entry</th><th>Exit</th>
+              <th>Size</th><th>SL</th><th>TP</th>
+              <th>PnL (USDT)</th><th>Status</th><th>Opened</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
 
     <!-- ── Activity Log (common) ─────────────────────────────────────────── -->
     <section class="panel">

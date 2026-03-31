@@ -3,8 +3,9 @@
  *
  * Architecture:
  *  • Common data (equity, mode, total PnL/WR, logs) is fetched globally.
- *  • Per-symbol data (price, signal, setup, positions, trades, chart) is
+ *  • Per-symbol data (price, signal, setup, chart) is
  *    fetched for the currently-selected tab symbol.
+ *  • Open positions and trade history are shared across all symbols.
  *  • Activity log is shared across all symbols (bottom of page).
  *  • Polls every 5 s via Promise.allSettled for resilience.
  */
@@ -64,8 +65,23 @@ async function switchSymbol(sym) {
     priceChart = null;
   }
 
+  resetSymbolSpecificWidgets();
   await loadConfig(sym);
   await refreshSymbolPanel();
+}
+
+function resetSymbolSpecificWidgets() {
+  document.getElementById('kpi-price').textContent = '–';
+  document.getElementById('kpi-signal').textContent = '–';
+
+  const setupEl = document.getElementById('kpi-setup');
+  setupEl.textContent = 'WAIT';
+  setupEl.className = 'card__value text-gold';
+
+  document.getElementById('kpi-waiting').textContent = '–';
+
+  renderChecks('long-checks', {});
+  renderChecks('short-checks', {});
 }
 
 // ── Fetch helpers ──────────────────────────────────────────────────────────
@@ -82,6 +98,7 @@ async function refreshAll() {
   await Promise.allSettled([
     refreshGlobal(),
     refreshSymbolPanel(),
+    refreshCommonTradePanels(),
     refreshLogs(),
   ]);
 }
@@ -175,8 +192,6 @@ async function refreshSymbolPanel() {
     refreshSymbolStatus(sym),
     refreshSymbolStats(sym),
     refreshMarketContext(sym),
-    refreshOpenTrades(sym),
-    refreshTradeHistory(sym),
   ]);
 }
 
@@ -184,6 +199,7 @@ async function refreshSymbolStatus(sym) {
   let s;
   try { s = await fetchJSON(`${API}/status?symbol=${encodeURIComponent(sym)}`); }
   catch { return; }
+  if (sym !== _activeSymbol) return;
   updateSymbolStatusStrip(s);
 }
 
@@ -191,6 +207,7 @@ async function refreshSymbolStats(sym) {
   let st;
   try { st = await fetchJSON(`${API}/stats?symbol=${encodeURIComponent(sym)}`); }
   catch { return; }
+  if (sym !== _activeSymbol) return;
 
   const symPnlEl = document.getElementById('kpi-sym-pnl');
   const pnl = Number(st.total_pnl || 0);
@@ -204,6 +221,7 @@ async function loadConfig(sym) {
   let cfg;
   try { cfg = await fetchJSON(`${API}/config?symbol=${encodeURIComponent(sym)}`); }
   catch { return; }
+  if (sym !== _activeSymbol) return;
 
   const tbody = document.querySelector('#param-table tbody');
   tbody.innerHTML = '';
@@ -231,9 +249,16 @@ async function loadConfig(sym) {
   });
 }
 
-async function refreshOpenTrades(sym) {
+async function refreshCommonTradePanels() {
+  await Promise.allSettled([
+    refreshOpenTrades(),
+    refreshTradeHistory(),
+  ]);
+}
+
+async function refreshOpenTrades() {
   let trades;
-  try { trades = await fetchJSON(`${API}/trades/open?symbol=${encodeURIComponent(sym)}`); }
+  try { trades = await fetchJSON(`${API}/trades/open`); }
   catch { return; }
 
   const container = document.getElementById('open-trades-container');
@@ -259,9 +284,9 @@ async function refreshOpenTrades(sym) {
   });
 }
 
-async function refreshTradeHistory(sym) {
+async function refreshTradeHistory() {
   let trades;
-  try { trades = await fetchJSON(`${API}/trades?symbol=${encodeURIComponent(sym)}&limit=50`); }
+  try { trades = await fetchJSON(`${API}/trades?limit=50`); }
   catch { return; }
 
   const tbody = document.querySelector('#trade-table tbody');
@@ -297,6 +322,7 @@ async function refreshMarketContext(sym) {
   let ctx;
   try { ctx = await fetchJSON(`${API}/market/context?symbol=${encodeURIComponent(sym)}&limit=200`); }
   catch { return; }
+  if (sym !== _activeSymbol) return;
   if (!ctx.ok || !ctx.candles || !ctx.candles.length) return;
 
   const labels = ctx.candles.map(c => fmtTs(c.ts));
