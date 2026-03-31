@@ -132,19 +132,25 @@ async function refreshAllStatus() {
 function updateSymbolStatusStrip(s) {
   if (!s) return;
 
-  document.getElementById('kpi-price').textContent =
-    s.last_price ? formatPrice(s.last_price) : '–';
+  // Only update price from bot status when the bot has a recorded price.
+  // When the bot hasn't run yet (last_price === null), the live price from
+  // refreshMarketContext will fill this in instead.
+  if (s.last_price) {
+    document.getElementById('kpi-price').textContent = formatPrice(s.last_price);
+  }
 
+  // kpi-signal reflects the last signal the bot actually executed.
+  // 'NONE' is the DB default (bot never fired); display '–' for both cases.
   const sigEl = document.getElementById('kpi-signal');
-  sigEl.textContent = s.last_signal || '–';
+  const sig = (s.last_signal && s.last_signal !== 'NONE') ? s.last_signal : '–';
+  sigEl.textContent = sig;
   sigEl.className = 'card__value ' + signalClass(s.last_signal);
 
-  const setupEl = document.getElementById('kpi-setup');
-  const hint = s.signal_hint || 'WAIT';
-  setupEl.textContent = hint.replaceAll('_', ' ');
-  setupEl.className = 'card__value ' + setupClass(hint);
-
-  document.getElementById('kpi-waiting').textContent = s.waiting_for || 'Collecting candles';
+  // kpi-setup and kpi-waiting are owned by refreshMarketContext which
+  // computes them live from fresh candles.  Updating them here from bot_status
+  // (which is only written during bot ticks) causes a race condition: stale
+  // defaults ("WAIT" / "Collecting candles") can overwrite the live values
+  // when the two parallel fetches settle in the wrong order.
 }
 
 async function refreshStats() {
@@ -289,7 +295,7 @@ async function refreshTradeHistory(sym) {
 
 async function refreshMarketContext(sym) {
   let ctx;
-  try { ctx = await fetchJSON(`${API}/market/context?symbol=${encodeURIComponent(sym)}&limit=120`); }
+  try { ctx = await fetchJSON(`${API}/market/context?symbol=${encodeURIComponent(sym)}&limit=200`); }
   catch { return; }
   if (!ctx.ok || !ctx.candles || !ctx.candles.length) return;
 
@@ -356,6 +362,21 @@ async function refreshMarketContext(sym) {
 
   renderChecks('long-checks',  ctx.long_checks  || {});
   renderChecks('short-checks', ctx.short_checks || {});
+
+  // Update live-market KPIs from fresh chart data.  This ensures price,
+  // setup, and waiting-for are always current even when the bot hasn't
+  // run a tick yet (e.g. ETH bot not started).
+  if (ctx.values && ctx.values.close != null) {
+    document.getElementById('kpi-price').textContent = formatPrice(ctx.values.close);
+  }
+  if (ctx.diagnostics) {
+    const hint = ctx.diagnostics.signal_hint || 'WAIT';
+    const setupEl = document.getElementById('kpi-setup');
+    setupEl.textContent = hint.replaceAll('_', ' ');
+    setupEl.className = 'card__value ' + setupClass(hint);
+    document.getElementById('kpi-waiting').textContent =
+      ctx.diagnostics.waiting_for || 'Collecting candles';
+  }
 }
 
 // ── Activity log (common) ─────────────────────────────────────────────────

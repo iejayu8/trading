@@ -126,9 +126,9 @@ class TestDatabase:
     def test_update_bot_status_requires_symbol(self):
         """Missing symbol should fail fast to surface migration issues."""
         with pytest.raises(TypeError):
-            database.update_bot_status(running=1)
+            database.update_bot_status(running=1)  # type: ignore[call-arg]
 
     def test_get_bot_status_requires_symbol(self):
         """Missing symbol should fail fast to surface migration issues."""
         with pytest.raises(TypeError):
-            database.get_bot_status()
+            database.get_bot_status()  # type: ignore[call-arg]
