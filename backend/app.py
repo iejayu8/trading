@@ -292,7 +292,10 @@ def api_market_context():
     ema_fast = values.get("ema_fast")
     target_band = None
     if close is not None and ema_fast is not None:
-        band = max(close * 0.002, 20.0)
+        # Use a pure percentage band (0.2 % of price) so the zone scales
+        # correctly for every symbol — avoids the old $20 floor that was
+        # disproportionately wide relative to ETH's price.
+        band = close * 0.002
         target_band = {
             # Long zone: reclaim area above EMA9.
             "long": {"low": ema_fast, "high": ema_fast + band},

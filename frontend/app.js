@@ -3,8 +3,9 @@
  *
  * Architecture:
  *  • Common data (equity, mode, total PnL/WR, logs) is fetched globally.
- *  • Per-symbol data (price, signal, setup, positions, trades, chart) is
+ *  • Per-symbol data (price, signal, setup, chart) is
  *    fetched for the currently-selected tab symbol.
+ *  • Open positions and trade history are shared across all symbols.
  *  • Activity log is shared across all symbols (bottom of page).
  *  • Polls every 5 s via Promise.allSettled for resilience.
  */
@@ -64,8 +65,23 @@ async function switchSymbol(sym) {
     priceChart = null;
   }
 
+  resetSymbolSpecificWidgets();
   await loadConfig(sym);
   await refreshSymbolPanel();
+}
+
+function resetSymbolSpecificWidgets() {
+  document.getElementById('kpi-price').textContent = '–';
+  document.getElementById('kpi-signal').textContent = '–';
+
+  const setupEl = document.getElementById('kpi-setup');
+  setupEl.textContent = 'WAIT';
+  setupEl.className = 'card__value text-gold';
+
+  document.getElementById('kpi-waiting').textContent = '–';
+
+  renderChecks('long-checks', {});
+  renderChecks('short-checks', {});
 }
 
 // ── Fetch helpers ──────────────────────────────────────────────────────────
@@ -82,6 +98,7 @@ async function refreshAll() {
   await Promise.allSettled([
     refreshGlobal(),
     refreshSymbolPanel(),
+    refreshCommonTradePanels(),
     refreshLogs(),
   ]);
 }
@@ -132,19 +149,25 @@ async function refreshAllStatus() {
 function updateSymbolStatusStrip(s) {
   if (!s) return;
 
-  document.getElementById('kpi-price').textContent =
-    s.last_price ? formatPrice(s.last_price) : '–';
+  // Only update price from bot status when the bot has a recorded price.
+  // When the bot hasn't run yet (last_price === null), the live price from
+  // refreshMarketContext will fill this in instead.
+  if (s.last_price) {
+    document.getElementById('kpi-price').textContent = formatPrice(s.last_price);
+  }
 
+  // kpi-signal reflects the last signal the bot actually executed.
+  // 'NONE' is the DB default (bot never fired); display '–' for both cases.
   const sigEl = document.getElementById('kpi-signal');
-  sigEl.textContent = s.last_signal || '–';
+  const sig = (s.last_signal && s.last_signal !== 'NONE') ? s.last_signal : '–';
+  sigEl.textContent = sig;
   sigEl.className = 'card__value ' + signalClass(s.last_signal);
 
-  const setupEl = document.getElementById('kpi-setup');
-  const hint = s.signal_hint || 'WAIT';
-  setupEl.textContent = hint.replaceAll('_', ' ');
-  setupEl.className = 'card__value ' + setupClass(hint);
-
-  document.getElementById('kpi-waiting').textContent = s.waiting_for || 'Collecting candles';
+  // kpi-setup and kpi-waiting are owned by refreshMarketContext which
+  // computes them live from fresh candles.  Updating them here from bot_status
+  // (which is only written during bot ticks) causes a race condition: stale
+  // defaults ("WAIT" / "Collecting candles") can overwrite the live values
+  // when the two parallel fetches settle in the wrong order.
 }
 
 async function refreshStats() {
@@ -169,8 +192,6 @@ async function refreshSymbolPanel() {
     refreshSymbolStatus(sym),
     refreshSymbolStats(sym),
     refreshMarketContext(sym),
-    refreshOpenTrades(sym),
-    refreshTradeHistory(sym),
   ]);
 }
 
@@ -178,6 +199,7 @@ async function refreshSymbolStatus(sym) {
   let s;
   try { s = await fetchJSON(`${API}/status?symbol=${encodeURIComponent(sym)}`); }
   catch { return; }
+  if (sym !== _activeSymbol) return;
   updateSymbolStatusStrip(s);
 }
 
@@ -185,6 +207,7 @@ async function refreshSymbolStats(sym) {
   let st;
   try { st = await fetchJSON(`${API}/stats?symbol=${encodeURIComponent(sym)}`); }
   catch { return; }
+  if (sym !== _activeSymbol) return;
 
   const symPnlEl = document.getElementById('kpi-sym-pnl');
   const pnl = Number(st.total_pnl || 0);
@@ -198,6 +221,7 @@ async function loadConfig(sym) {
   let cfg;
   try { cfg = await fetchJSON(`${API}/config?symbol=${encodeURIComponent(sym)}`); }
   catch { return; }
+  if (sym !== _activeSymbol) return;
 
   const tbody = document.querySelector('#param-table tbody');
   tbody.innerHTML = '';
@@ -225,9 +249,16 @@ async function loadConfig(sym) {
   });
 }
 
-async function refreshOpenTrades(sym) {
+async function refreshCommonTradePanels() {
+  await Promise.allSettled([
+    refreshOpenTrades(),
+    refreshTradeHistory(),
+  ]);
+}
+
+async function refreshOpenTrades() {
   let trades;
-  try { trades = await fetchJSON(`${API}/trades/open?symbol=${encodeURIComponent(sym)}`); }
+  try { trades = await fetchJSON(`${API}/trades/open`); }
   catch { return; }
 
   const container = document.getElementById('open-trades-container');
@@ -253,9 +284,9 @@ async function refreshOpenTrades(sym) {
   });
 }
 
-async function refreshTradeHistory(sym) {
+async function refreshTradeHistory() {
   let trades;
-  try { trades = await fetchJSON(`${API}/trades?symbol=${encodeURIComponent(sym)}&limit=50`); }
+  try { trades = await fetchJSON(`${API}/trades?limit=50`); }
   catch { return; }
 
   const tbody = document.querySelector('#trade-table tbody');
@@ -289,8 +320,9 @@ async function refreshTradeHistory(sym) {
 
 async function refreshMarketContext(sym) {
   let ctx;
-  try { ctx = await fetchJSON(`${API}/market/context?symbol=${encodeURIComponent(sym)}&limit=120`); }
+  try { ctx = await fetchJSON(`${API}/market/context?symbol=${encodeURIComponent(sym)}&limit=200`); }
   catch { return; }
+  if (sym !== _activeSymbol) return;
   if (!ctx.ok || !ctx.candles || !ctx.candles.length) return;
 
   const labels = ctx.candles.map(c => fmtTs(c.ts));
@@ -356,6 +388,21 @@ async function refreshMarketContext(sym) {
 
   renderChecks('long-checks',  ctx.long_checks  || {});
   renderChecks('short-checks', ctx.short_checks || {});
+
+  // Update live-market KPIs from fresh chart data.  This ensures price,
+  // setup, and waiting-for are always current even when the bot hasn't
+  // run a tick yet (e.g. ETH bot not started).
+  if (ctx.values && ctx.values.close != null) {
+    document.getElementById('kpi-price').textContent = formatPrice(ctx.values.close);
+  }
+  if (ctx.diagnostics) {
+    const hint = ctx.diagnostics.signal_hint || 'WAIT';
+    const setupEl = document.getElementById('kpi-setup');
+    setupEl.textContent = hint.replaceAll('_', ' ');
+    setupEl.className = 'card__value ' + setupClass(hint);
+    document.getElementById('kpi-waiting').textContent =
+      ctx.diagnostics.waiting_for || 'Collecting candles';
+  }
 }
 
 // ── Activity log (common) ─────────────────────────────────────────────────
