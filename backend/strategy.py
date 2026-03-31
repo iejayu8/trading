@@ -163,10 +163,25 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-_last_signal_bar: dict[str, int] = {"bar": -SIGNAL_COOLDOWN}
+_last_signal_bar: dict[str, int] = {}
+# Keys are trading symbols (e.g. "BTC-USDT", "ETH-USDT").
+# A missing key means the symbol has never signalled → treated as -SIGNAL_COOLDOWN.
 
 
-def generate_signal(df: pd.DataFrame) -> str:
+def _get_last_bar(symbol: str) -> int:
+    """Return the bar index of the last signal for *symbol*."""
+    return _last_signal_bar.get(symbol, -SIGNAL_COOLDOWN)
+
+
+def reset_signal_state(symbol: str | None = None) -> None:
+    """Reset cooldown state for *symbol* (or all symbols when None)."""
+    if symbol is None:
+        _last_signal_bar.clear()
+    else:
+        _last_signal_bar.pop(symbol, None)
+
+
+def generate_signal(df: pd.DataFrame, symbol: str = "BTC-USDT") -> str:
     """
     Generate a signal based on the latest completed candle.
 
@@ -176,7 +191,7 @@ def generate_signal(df: pd.DataFrame) -> str:
         return Signal.NONE
 
     current_bar = len(df) - 1
-    if current_bar - _last_signal_bar.get("bar", -SIGNAL_COOLDOWN) < SIGNAL_COOLDOWN:
+    if current_bar - _get_last_bar(symbol) < SIGNAL_COOLDOWN:
         return Signal.NONE
 
     last = df.iloc[-1]
@@ -194,18 +209,18 @@ def generate_signal(df: pd.DataFrame) -> str:
 
     # ── Long: fresh pullback + recovery within uptrend ─────────────────────
     if all(checks["long_checks"].values()):
-        _last_signal_bar["bar"] = current_bar
+        _last_signal_bar[symbol] = current_bar
         return Signal.LONG
 
     # ── Short: fresh rally + rejection within downtrend ────────────────────
     if all(checks["short_checks"].values()):
-        _last_signal_bar["bar"] = current_bar
+        _last_signal_bar[symbol] = current_bar
         return Signal.SHORT
 
     return Signal.NONE
 
 
-def get_signal_diagnostics(df: pd.DataFrame) -> dict:
+def get_signal_diagnostics(df: pd.DataFrame, symbol: str = "BTC-USDT") -> dict:
     """
     Explain current strategy state and what the bot is waiting for.
 
@@ -225,7 +240,7 @@ def get_signal_diagnostics(df: pd.DataFrame) -> dict:
         out["waiting_for"] = f"Collecting candles ({len(df)}/{min_bars})"
         return out
 
-    bars_since = current_bar - _last_signal_bar.get("bar", -SIGNAL_COOLDOWN)
+    bars_since = current_bar - _get_last_bar(symbol)
     cooldown_left = SIGNAL_COOLDOWN - bars_since
     if cooldown_left > 0:
         out["signal_hint"] = "COOLDOWN"
@@ -335,6 +350,7 @@ def calculate_position_size(
     entry_price: float,
     leverage: int = None,
     risk_pct: float = None,
+    stop_loss_pct: float = None,
 ) -> float:
     """
     Size the position so a SL hit costs equity × risk_pct.
@@ -345,18 +361,30 @@ def calculate_position_size(
         leverage = config.LEVERAGE
     if risk_pct is None:
         risk_pct = config.RISK_PER_TRADE
+    if stop_loss_pct is None:
+        stop_loss_pct = config.STOP_LOSS_PCT
 
     risk_amount = equity * risk_pct
-    size        = risk_amount / (entry_price * config.STOP_LOSS_PCT)
+    size        = risk_amount / (entry_price * stop_loss_pct)
     return max(round(size, 4), 0.001)
 
 
-def calculate_sl_tp(entry_price: float, direction: str) -> tuple[float, float]:
+def calculate_sl_tp(
+    entry_price: float,
+    direction: str,
+    stop_loss_pct: float = None,
+    take_profit_pct: float = None,
+) -> tuple[float, float]:
     """Return (stop_loss_price, take_profit_price)."""
+    if stop_loss_pct is None:
+        stop_loss_pct = config.STOP_LOSS_PCT
+    if take_profit_pct is None:
+        take_profit_pct = config.TAKE_PROFIT_PCT
+
     if direction == Signal.LONG:
-        sl = entry_price * (1 - config.STOP_LOSS_PCT)
-        tp = entry_price * (1 + config.TAKE_PROFIT_PCT)
+        sl = entry_price * (1 - stop_loss_pct)
+        tp = entry_price * (1 + take_profit_pct)
     else:
-        sl = entry_price * (1 + config.STOP_LOSS_PCT)
-        tp = entry_price * (1 - config.TAKE_PROFIT_PCT)
+        sl = entry_price * (1 + stop_loss_pct)
+        tp = entry_price * (1 - take_profit_pct)
     return round(sl, 2), round(tp, 2)

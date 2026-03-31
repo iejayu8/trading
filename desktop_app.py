@@ -40,6 +40,20 @@ BACKEND_SCRIPT = os.path.join(BASE_DIR, "backend", "app.py")
 CREDENTIALS_FILE = os.path.join(BASE_DIR, "credentials.env")
 BACKEND_URL = "http://localhost:5000"
 
+
+def _resolve_python() -> str:
+    """Return the best Python interpreter to spawn the backend with.
+
+    Priority:
+    1. The project's own .venv (works when running from source).
+    2. sys.executable (correct when packaged with PyInstaller as an .exe).
+    """
+    if not getattr(sys, "frozen", False):
+        venv_python = os.path.join(BASE_DIR, ".venv", "Scripts", "python.exe")
+        if os.path.isfile(venv_python):
+            return venv_python
+    return sys.executable
+
 LOADING_HTML = """
 <!DOCTYPE html>
 <html>
@@ -153,7 +167,7 @@ def start_backend() -> subprocess.Popen:
     # sys.executable points to the .exe wrapper, so we use it to spawn the
     # backend script directly – Python will handle it via the bundled runtime.
     _backend_proc = subprocess.Popen(
-        [sys.executable, BACKEND_SCRIPT],
+        [_resolve_python(), BACKEND_SCRIPT],
         cwd=os.path.join(BASE_DIR, "backend"),
         env=env,
         stdout=subprocess.PIPE,

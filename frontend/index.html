@@ -10,33 +10,21 @@
   <header>
     <div class="header-inner">
       <div class="logo">
-        <span class="logo-icon">₿</span>
+        <span class="logo-icon">⚡</span>
         <span class="logo-text">BloFin Trading Bot</span>
       </div>
       <div class="header-status">
         <span id="bot-indicator" class="indicator indicator--stopped"></span>
         <span id="bot-status-text">Stopped</span>
-        <button id="btn-start" class="btn btn--success" onclick="startBot()">Start Bot</button>
-        <button id="btn-stop"  class="btn btn--danger"  onclick="stopBot()" disabled>Stop Bot</button>
+        <button id="btn-start" class="btn btn--success" onclick="startBot()">Start All</button>
+        <button id="btn-stop"  class="btn btn--danger"  onclick="stopBot()" disabled>Stop All</button>
       </div>
     </div>
   </header>
 
   <main>
-    <!-- ── KPI Cards ─────────────────────────────────────────────────────── -->
-    <section class="cards">
-      <div class="card">
-        <div class="card__label">Symbol</div>
-        <div class="card__value" id="kpi-symbol">BTC-USDT</div>
-      </div>
-      <div class="card">
-        <div class="card__label">Last Price</div>
-        <div class="card__value" id="kpi-price">–</div>
-      </div>
-      <div class="card">
-        <div class="card__label">Last Signal</div>
-        <div class="card__value" id="kpi-signal">–</div>
-      </div>
+    <!-- ── Common KPI Cards ───────────────────────────────────────────────── -->
+    <section class="cards cards--common">
       <div class="card">
         <div class="card__label">Equity (USDT)</div>
         <div class="card__value" id="kpi-equity">–</div>
@@ -46,87 +34,123 @@
         <div class="card__value" id="kpi-mode">REALTRADING</div>
       </div>
       <div class="card">
-        <div class="card__label">Total PnL</div>
+        <div class="card__label">Total PnL (All)</div>
         <div class="card__value" id="kpi-pnl">–</div>
       </div>
       <div class="card">
-        <div class="card__label">Win Rate</div>
+        <div class="card__label">Win Rate (All)</div>
         <div class="card__value" id="kpi-winrate">–</div>
       </div>
       <div class="card">
-        <div class="card__label">Entry Setup</div>
-        <div class="card__value" id="kpi-setup">WAIT</div>
-      </div>
-      <div class="card">
-        <div class="card__label">Waiting For</div>
-        <div class="card__value card__value--small" id="kpi-waiting">Collecting candles</div>
+        <div class="card__label">Total Trades</div>
+        <div class="card__value" id="kpi-total-trades">–</div>
       </div>
     </section>
 
-    <!-- ── Two-column layout ─────────────────────────────────────────────── -->
-    <div class="grid-2">
-      <!-- Strategy Parameters -->
-      <section class="panel">
-        <h2 class="panel__title">Strategy Parameters</h2>
-        <table class="param-table" id="param-table">
-          <thead><tr><th>Parameter</th><th>Value</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </section>
-
-      <!-- Open Positions -->
-      <section class="panel">
-        <h2 class="panel__title">Open Positions</h2>
-        <div id="open-trades-container">
-          <p class="empty-msg">No open positions</p>
-        </div>
-      </section>
+    <!-- ── Symbol Tabs ───────────────────────────────────────────────────── -->
+    <div class="symbol-tabs" id="symbol-tabs">
+      <!-- Tabs injected by JS from /api/symbols -->
     </div>
 
-    <!-- ── Trade History ─────────────────────────────────────────────────── -->
-    <section class="panel">
-      <h2 class="panel__title">Trade History</h2>
-      <div class="table-scroll">
-        <table class="data-table" id="trade-table">
-          <thead>
-            <tr>
-              <th>#</th><th>Direction</th><th>Entry</th><th>Exit</th>
-              <th>Size</th><th>SL</th><th>TP</th>
-              <th>PnL (USDT)</th><th>Status</th><th>Opened</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </section>
+    <!-- ── Per-Symbol Panel ──────────────────────────────────────────────── -->
+    <div id="symbol-panel">
 
-    <section class="panel">
-      <h2 class="panel__title">Market Context</h2>
-      <div class="market-grid">
-        <div class="chart-wrap">
-          <canvas id="price-chart"></canvas>
+      <!-- Symbol status strip -->
+      <section class="cards cards--symbol" id="symbol-kpi-cards">
+        <div class="card">
+          <div class="card__label">Last Price</div>
+          <div class="card__value" id="kpi-price">–</div>
         </div>
-        <div>
-          <div class="checklist-block">
-            <h3 class="sub-title">Long Conditions</h3>
-            <ul id="long-checks" class="checklist"></ul>
-          </div>
-          <div class="checklist-block">
-            <h3 class="sub-title">Short Conditions</h3>
-            <ul id="short-checks" class="checklist"></ul>
-          </div>
+        <div class="card">
+          <div class="card__label">Last Signal</div>
+          <div class="card__value" id="kpi-signal">–</div>
         </div>
-      </div>
-    </section>
+        <div class="card">
+          <div class="card__label">Entry Setup</div>
+          <div class="card__value" id="kpi-setup">WAIT</div>
+        </div>
+        <div class="card">
+          <div class="card__label">Waiting For</div>
+          <div class="card__value card__value--small" id="kpi-waiting">–</div>
+        </div>
+        <div class="card">
+          <div class="card__label">Symbol PnL</div>
+          <div class="card__value" id="kpi-sym-pnl">–</div>
+        </div>
+        <div class="card">
+          <div class="card__label">Symbol WR</div>
+          <div class="card__value" id="kpi-sym-wr">–</div>
+        </div>
+      </section>
 
-    <!-- ── Activity Log ──────────────────────────────────────────────────── -->
+      <!-- Two-column layout -->
+      <div class="grid-2">
+        <!-- Strategy Parameters -->
+        <section class="panel">
+          <h2 class="panel__title">Strategy Parameters</h2>
+          <table class="param-table" id="param-table">
+            <thead><tr><th>Parameter</th><th>Value</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </section>
+
+        <!-- Open Positions -->
+        <section class="panel">
+          <h2 class="panel__title">Open Positions</h2>
+          <div id="open-trades-container">
+            <p class="empty-msg">No open positions</p>
+          </div>
+        </section>
+      </div>
+
+      <!-- Trade History -->
+      <section class="panel">
+        <h2 class="panel__title">Trade History</h2>
+        <div class="table-scroll">
+          <table class="data-table" id="trade-table">
+            <thead>
+              <tr>
+                <th>#</th><th>Direction</th><th>Entry</th><th>Exit</th>
+                <th>Size</th><th>SL</th><th>TP</th>
+                <th>PnL (USDT)</th><th>Status</th><th>Opened</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Market Context -->
+      <section class="panel">
+        <h2 class="panel__title">Market Context</h2>
+        <div class="market-grid">
+          <div class="chart-wrap">
+            <canvas id="price-chart"></canvas>
+          </div>
+          <div>
+            <div class="checklist-block">
+              <h3 class="sub-title">Long Conditions</h3>
+              <ul id="long-checks" class="checklist"></ul>
+            </div>
+            <div class="checklist-block">
+              <h3 class="sub-title">Short Conditions</h3>
+              <ul id="short-checks" class="checklist"></ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div><!-- /symbol-panel -->
+
+    <!-- ── Activity Log (common) ─────────────────────────────────────────── -->
     <section class="panel">
       <div class="panel__head">
-        <h2 class="panel__title">Activity Log</h2>
+        <h2 class="panel__title">Activity Log <span class="tag tag--info">All Symbols</span></h2>
         <button id="btn-clear-logs" class="btn btn--secondary" onclick="clearLogs()">Clear Log</button>
       </div>
       <div id="log-container" class="log-container"></div>
     </section>
+
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>

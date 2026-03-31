@@ -3,14 +3,21 @@ app.py – Flask REST API server.
 
 Endpoints
 ──────────
-GET  /api/status          – bot status, equity, last signal
-GET  /api/trades          – trade history
-GET  /api/trades/open     – open trades
-GET  /api/stats           – performance statistics
-GET  /api/logs            – bot activity log
-POST /api/bot/start       – start the bot
-POST /api/bot/stop        – stop the bot
-GET  /api/config          – current strategy parameters (read-only)
+GET  /api/symbols              – list of supported trading symbols
+GET  /api/status               – all symbols' bot status
+GET  /api/status?symbol=X      – single symbol status
+GET  /api/trades               – trade history (all or ?symbol=X)
+GET  /api/trades/open          – open trades (all or ?symbol=X)
+GET  /api/stats                – aggregate performance statistics
+GET  /api/stats?symbol=X       – per-symbol performance statistics
+GET  /api/logs                 – bot activity log
+POST /api/logs/clear           – clear activity log
+POST /api/bot/start            – start all symbol bots
+POST /api/bot/start?symbol=X   – start single symbol bot
+POST /api/bot/stop             – stop all symbol bots
+POST /api/bot/stop?symbol=X    – stop single symbol bot
+GET  /api/config               – current strategy parameters (read-only)
+GET  /api/market/context       – live chart + indicators (?symbol=X)
 """
 
 from __future__ import annotations
@@ -52,26 +59,53 @@ def static_files(filename):
     return send_from_directory(_FRONTEND_DIR, filename)
 
 
-# Single bot instance (starts stopped)
-_bot: TradingBot | None = None
-_bot_lock = threading.Lock()
+# ── Multi-bot registry ────────────────────────────────────────────────────────
+# One TradingBot instance per supported symbol, lazily created.
+
+_bots: dict[str, TradingBot] = {}
+_bots_lock = threading.Lock()
 
 
-def _get_bot() -> TradingBot:
-    global _bot
-    with _bot_lock:
-        if _bot is None:
-            _bot = TradingBot()
-    return _bot
+def _get_bot(symbol: str) -> TradingBot:
+    with _bots_lock:
+        if symbol not in _bots:
+            _bots[symbol] = TradingBot(symbol=symbol)
+    return _bots[symbol]
+
+
+def _all_bots() -> list[TradingBot]:
+    return [_get_bot(s) for s in config.SUPPORTED_SYMBOLS]
 
 
 # ── Status & monitoring ───────────────────────────────────────────────────────
 
+@app.get("/api/symbols")
+def api_symbols():
+    return jsonify(config.SUPPORTED_SYMBOLS)
+
+
 @app.get("/api/status")
 def api_status():
-    status = db.get_bot_status()
-    status["trading_mode"] = config.TRADING_MODE
-    return jsonify(status)
+    symbol = request.args.get("symbol")
+    if symbol:
+        # Single-symbol status
+        status = db.get_bot_status(symbol)
+        status["symbol"] = symbol
+        status["trading_mode"] = config.TRADING_MODE
+        bot = _bots.get(symbol)
+        status["running"] = 1 if (bot and bot.is_running) else status.get("running", 0)
+        return jsonify(status)
+
+    # All symbols – return a dict keyed by symbol
+    all_status = {}
+    for sym in config.SUPPORTED_SYMBOLS:
+        s = db.get_bot_status(sym)
+        s["symbol"] = sym
+        s["trading_mode"] = config.TRADING_MODE
+        bot = _bots.get(sym)
+        s["running"] = 1 if (bot and bot.is_running) else s.get("running", 0)
+        all_status[sym] = s
+    return jsonify(all_status)
 
 
 @app.get("/api/trades")
@@ -89,7 +123,8 @@ def api_open_trades():
 
 @app.get("/api/stats")
 def api_stats():
-    return jsonify(db.get_trade_stats())
+    symbol = request.args.get("symbol")
+    return jsonify(db.get_trade_stats(symbol=symbol))
 
 
 @app.get("/api/logs")
@@ -108,36 +143,67 @@ def api_logs_clear():
 
 @app.post("/api/bot/start")
 def api_start():
-    bot = _get_bot()
-    if bot.is_running:
-        return jsonify({"ok": False, "message": "Bot is already running"}), 400
-    bot.start()
-    return jsonify({"ok": True, "message": "Bot started"})
+    symbol = request.args.get("symbol")
+    if symbol:
+        if symbol not in config.SUPPORTED_SYMBOLS:
+            return jsonify({"ok": False, "message": f"Unknown symbol: {symbol}"}), 400
+        bot = _get_bot(symbol)
+        if bot.is_running:
+            return jsonify({"ok": False, "message": f"{symbol} bot is already running"}), 400
+        bot.start()
+        return jsonify({"ok": True, "message": f"{symbol} bot started"})
+
+    # Start all bots
+    started = []
+    for sym in config.SUPPORTED_SYMBOLS:
+        bot = _get_bot(sym)
+        if not bot.is_running:
+            bot.start()
+            started.append(sym)
+    if not started:
+        return jsonify({"ok": False, "message": "All bots are already running"}), 400
+    return jsonify({"ok": True, "message": f"Started bots: {', '.join(started)}"})
 
 
 @app.post("/api/bot/stop")
 def api_stop():
-    bot = _get_bot()
-    if not bot.is_running:
-        return jsonify({"ok": False, "message": "Bot is not running"}), 400
-    bot.stop()
-    return jsonify({"ok": True, "message": "Bot stopped"})
+    symbol = request.args.get("symbol")
+    if symbol:
+        if symbol not in config.SUPPORTED_SYMBOLS:
+            return jsonify({"ok": False, "message": f"Unknown symbol: {symbol}"}), 400
+        bot = _bots.get(symbol)
+        if not bot or not bot.is_running:
+            return jsonify({"ok": False, "message": f"{symbol} bot is not running"}), 400
+        bot.stop()
+        return jsonify({"ok": True, "message": f"{symbol} bot stopped"})
+
+    # Stop all bots
+    stopped = []
+    for sym, bot in list(_bots.items()):
+        if bot.is_running:
+            bot.stop()
+            stopped.append(sym)
+    if not stopped:
+        return jsonify({"ok": False, "message": "No bots are running"}), 400
+    return jsonify({"ok": True, "message": f"Stopped bots: {', '.join(stopped)}"})
 
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 @app.get("/api/config")
 def api_config():
+    symbol = request.args.get("symbol", config.TRADING_SYMBOL)
+    sym_params = config.get_symbol_params(symbol)
     return jsonify(
         {
-            "symbol": config.TRADING_SYMBOL,
+            "symbol": symbol,
             "trading_mode": config.TRADING_MODE,
             "timeframe": config.TIMEFRAME,
             "leverage": config.LEVERAGE,
             "paper_start_equity": config.PAPER_START_EQUITY,
             "risk_per_trade_pct": config.RISK_PER_TRADE * 100,
-            "stop_loss_pct": config.STOP_LOSS_PCT * 100,
-            "take_profit_pct": config.TAKE_PROFIT_PCT * 100,
+            "stop_loss_pct": sym_params["stop_loss_pct"] * 100,
+            "take_profit_pct": sym_params["take_profit_pct"] * 100,
             "fast_ema": config.FAST_EMA,
             "slow_ema": config.SLOW_EMA,
             "trend_ema": config.TREND_EMA,
@@ -153,7 +219,10 @@ def api_config():
 @app.get("/api/market/context")
 def api_market_context():
     symbol = request.args.get("symbol", config.TRADING_SYMBOL)
-    limit = int(request.args.get("limit", 120))
+    try:
+        limit = int(request.args.get("limit", 120))
+    except (ValueError, TypeError):
+        return jsonify({"ok": False, "message": "Invalid limit parameter"}), 400
     limit = max(60, min(limit, 200))
 
     client = BloFinClient()
@@ -176,7 +245,7 @@ def api_market_context():
     df = df.set_index("datetime").sort_index()
 
     df = compute_indicators(df)
-    diagnostics = get_signal_diagnostics(df)
+    diagnostics = get_signal_diagnostics(df, symbol=symbol)
     checks = get_signal_checks(df)
     values = checks.get("values", {})
 

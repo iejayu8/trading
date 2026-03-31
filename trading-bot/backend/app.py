@@ -202,8 +202,10 @@ def api_market_context():
     if close is not None and ema_fast is not None:
         band = max(close * 0.002, 20.0)
         target_band = {
-            "long": {"low": ema_fast - band, "high": ema_fast + band},
-            "short": {"low": ema_fast - band, "high": ema_fast + band},
+            # Long zone: reclaim area above EMA9.
+            "long": {"low": ema_fast, "high": ema_fast + band},
+            # Short zone: rejection area below EMA9.
+            "short": {"low": ema_fast - band, "high": ema_fast},
         }
 
     return jsonify(

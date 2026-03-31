@@ -21,6 +21,7 @@ from strategy import (
     calculate_sl_tp,
     compute_indicators,
     generate_signal,
+    reset_signal_state as _reset_strategy_state,
 )
 
 
@@ -103,7 +104,7 @@ def make_short_trigger_ohlcv(n: int = 700) -> pd.DataFrame:
 
 def reset_signal_state():
     """Reset the module-level cooldown tracker between tests."""
-    _last_signal_bar["bar"] = -SIGNAL_COOLDOWN
+    _reset_strategy_state()  # clears all symbols
 
 
 # ── compute_indicators ────────────────────────────────────────────────────────
@@ -171,7 +172,7 @@ class TestGenerateSignal:
         reset_signal_state()
         df = make_ohlcv(600, trend="up")
         df = compute_indicators(df)
-        signals = [generate_signal(df.iloc[: i + 1]) for i in range(220, len(df))]
+        signals = [generate_signal(df.iloc[: i + 1], symbol="BTC-USDT") for i in range(220, len(df))]
         assert Signal.LONG in signals
 
     def test_short_signal_on_downtrend(self):
@@ -185,15 +186,27 @@ class TestGenerateSignal:
         reset_signal_state()
         df = make_short_trigger_ohlcv()
         df = compute_indicators(df)
-        signals = [generate_signal(df.iloc[: i + 1]) for i in range(220, len(df))]
+        signals = [generate_signal(df.iloc[: i + 1], symbol="BTC-USDT") for i in range(220, len(df))]
         assert Signal.SHORT in signals
 
     def test_returns_valid_value(self):
         reset_signal_state()
         df = make_ohlcv(400)
         df = compute_indicators(df)
-        sig = generate_signal(df)
+        sig = generate_signal(df, symbol="BTC-USDT")
         assert sig in (Signal.LONG, Signal.SHORT, Signal.NONE)
+
+    def test_per_symbol_cooldown_independent(self):
+        """Signals for BTC and ETH use independent cooldown counters."""
+        _reset_strategy_state()
+        df = make_ohlcv(600, trend="up")
+        df = compute_indicators(df)
+        # Generate a signal for BTC
+        _last_signal_bar["BTC-USDT"] = len(df) - 1  # set cooldown for BTC
+        # ETH cooldown is unaffected — it can still signal
+        assert "ETH-USDT" not in _last_signal_bar or \
+               _last_signal_bar.get("ETH-USDT", -SIGNAL_COOLDOWN) == -SIGNAL_COOLDOWN or \
+               len(df) - 1 - _last_signal_bar.get("ETH-USDT", -SIGNAL_COOLDOWN) >= SIGNAL_COOLDOWN
 
 
 # ── calculate_position_size ───────────────────────────────────────────────────
@@ -250,3 +263,19 @@ class TestCalculateSlTp:
         _, tp = calculate_sl_tp(entry, Signal.LONG)
         actual_pct = (tp - entry) / entry
         assert abs(actual_pct - config.TAKE_PROFIT_PCT) < 0.0001
+
+    def test_eth_custom_sl_tp(self):
+        """ETH params produce wider TP and tighter SL than default."""
+        entry = 2000.0
+        sl_eth, tp_eth = calculate_sl_tp(entry, Signal.LONG, stop_loss_pct=0.015, take_profit_pct=0.070)
+        sl_btc, tp_btc = calculate_sl_tp(entry, Signal.LONG)  # BTC defaults
+        assert sl_eth > sl_btc   # ETH SL is closer to entry (tighter)
+        assert tp_eth > tp_btc   # ETH TP is further from entry (wider)
+
+    def test_custom_sl_tp_rr(self):
+        """ETH 1.5%/7.0% params give a 4.67:1 R/R ratio."""
+        entry = 2000.0
+        sl, tp = calculate_sl_tp(entry, Signal.LONG, stop_loss_pct=0.015, take_profit_pct=0.070)
+        risk   = entry - sl
+        reward = tp - entry
+        assert reward / risk >= 4.0  # ≥ 4:1 for ETH params

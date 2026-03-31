@@ -58,8 +58,9 @@ class Backtest:
     SLIPPAGE = 0.0005  # 0.05 %
     FEE_RATE = 0.0006  # 0.06 % taker fee
 
-    def __init__(self, initial_equity: float = 1000.0) -> None:
+    def __init__(self, initial_equity: float = 1000.0, symbol: str = "BTC-USDT") -> None:
         self.initial_equity = initial_equity
+        self.symbol = symbol
         self.equity = initial_equity
         self.trades: list[dict] = []
         self._open: dict | None = None  # current open trade
@@ -67,6 +68,7 @@ class Backtest:
     def run(self, df: pd.DataFrame) -> dict:
         """Run the backtest on a complete OHLCV DataFrame."""
         df = compute_indicators(df)
+        params = config.get_symbol_params(self.symbol)
 
         for i in range(config.TREND_EMA + 5, len(df)):
             candle = df.iloc[i]
@@ -86,7 +88,7 @@ class Backtest:
             if self._open:
                 continue  # already in a trade
 
-            signal = generate_signal(prev_window)
+            signal = generate_signal(prev_window, symbol=self.symbol)
             if signal == Signal.NONE:
                 continue
 
@@ -105,7 +107,11 @@ class Backtest:
                 entry_price *= 1 - self.SLIPPAGE
 
             size = calculate_position_size(self.equity, entry_price)
-            sl, tp = calculate_sl_tp(entry_price, signal)
+            sl, tp = calculate_sl_tp(
+                entry_price, signal,
+                stop_loss_pct=params["stop_loss_pct"],
+                take_profit_pct=params["take_profit_pct"],
+            )
 
             # Fee on open
             fee = entry_price * size * self.FEE_RATE
@@ -265,7 +271,8 @@ class Backtest:
 # ── CLI entry point ───────────────────────────────────────────────────────────
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="BTC/USDT 15-min strategy backtest")
+    parser = argparse.ArgumentParser(description="Strategy backtester")
+    parser.add_argument("--symbol", type=str, default="BTCUSDT", help="Binance symbol (e.g. ETHUSDT)")
     parser.add_argument("--fresh", action="store_true", help="Re-fetch data")
     parser.add_argument(
         "--equity", type=float, default=1000.0, help="Starting equity (USDT)"
@@ -273,11 +280,14 @@ def main() -> None:
     parser.add_argument("--days", type=int, default=365, help="Days of history")
     args = parser.parse_args()
 
+    symbol_upper = args.symbol.upper()
+    blofin_symbol = symbol_upper.replace("USDT", "-USDT")  # ETHUSDT → ETH-USDT
+
     if args.fresh:
-        csv = Path(__file__).parent / "data" / "BTCUSDT_15m.csv"
+        csv = Path(__file__).parent / "data" / f"{symbol_upper}_15m.csv"
         csv.unlink(missing_ok=True)
 
-    df = load_or_fetch("BTCUSDT", days=args.days)
+    df = load_or_fetch(symbol_upper, days=args.days)
     print(f"\nLoaded {len(df)} candles  ({df.index[0]} → {df.index[-1]})\n")
 
     bt = Backtest(initial_equity=args.equity)
@@ -287,15 +297,18 @@ def main() -> None:
         print(f"ERROR: {results['error']}")
         return
 
+    # Per-symbol params for display
+    sym_params = config.get_symbol_params(blofin_symbol)
+
     # Pretty print summary
     print("=" * 55)
     print("  BACKTEST RESULTS")
     print("=" * 55)
-    print(f"  Symbol          : BTC-USDT")
+    print(f"  Symbol          : {blofin_symbol}")
     print(f"  Timeframe       : 15m")
     print(f"  Leverage        : {config.LEVERAGE}x")
     print(f"  Risk/trade      : {config.RISK_PER_TRADE*100:.1f}%")
-    print(f"  SL / TP         : {config.STOP_LOSS_PCT*100:.1f}% / {config.TAKE_PROFIT_PCT*100:.1f}%")
+    print(f"  SL / TP         : {sym_params['stop_loss_pct']*100:.1f}% / {sym_params['take_profit_pct']*100:.1f}%")
     print("-" * 55)
     print(f"  Initial equity  : ${results['initial_equity']:.2f}")
     print(f"  Final equity    : ${results['final_equity']:.2f}")
@@ -310,8 +323,9 @@ def main() -> None:
 
     # Save JSON results
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    out_path = RESULTS_DIR / f"backtest_{ts}.json"
+    out_path = RESULTS_DIR / f"backtest_{symbol_upper}_{ts}.json"
     results_to_save = {k: v for k, v in results.items() if k != "trades"}
+    results_to_save["symbol"] = blofin_symbol
     results_to_save["trades_count"] = len(results.get("trades", []))
     with open(out_path, "w") as f:
         json.dump(results_to_save, f, indent=2)

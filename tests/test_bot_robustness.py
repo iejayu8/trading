@@ -99,7 +99,10 @@ class TestBotRobustness:
         closed_ids = []
         monkeypatch.setattr(db, "close_trade", lambda trade_id, exit_price, pnl: closed_ids.append(trade_id))
 
-        local = [{"id": 10}, {"id": 11}]
+        local = [
+            {"id": 10, "direction": "LONG", "entry_price": 90.0, "size": 1.0},
+            {"id": 11, "direction": "SHORT", "entry_price": 110.0, "size": 2.0},
+        ]
         out = bot._reconcile_local_open_trades(local, exchange_has_position=False, mark_price=100.0)
 
         assert out == []
