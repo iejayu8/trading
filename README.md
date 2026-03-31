@@ -1,5 +1,22 @@
 # trading
 
+## Backend Import Policy
+
+Backend modules prefer package-relative imports (for example, `from . import config`).
+
+Some workflows in this repository still execute backend modules in direct-module mode
+(tests and certain local tooling), where package-relative imports are unavailable. For
+that reason, selected backend files keep a narrow `ImportError` fallback to absolute
+imports.
+
+In short:
+
+- Preferred runtime mode: `python -m backend.app`
+- Supported compatibility mode: direct module imports with fallback
+
+This keeps package execution as the standard while preserving compatibility during
+migration.
+
 ## Run As Windows Desktop App
 
 This repository also includes a desktop launcher for Windows:

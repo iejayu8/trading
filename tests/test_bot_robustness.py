@@ -96,8 +96,12 @@ class TestBotRobustness:
     def test_reconciliation_closes_stale_local_open_trades(self, monkeypatch):
         bot = TradingBot(symbol="BTC-USDT")
 
-        closed_ids = []
-        monkeypatch.setattr(db, "close_trade", lambda trade_id, exit_price, pnl: closed_ids.append(trade_id))
+        closed_calls = []
+        monkeypatch.setattr(
+            db,
+            "close_trade",
+            lambda trade_id, exit_price, pnl: closed_calls.append((trade_id, exit_price, pnl)),
+        )
 
         local = [
             {"id": 10, "direction": "LONG", "entry_price": 90.0, "size": 1.0},
@@ -106,7 +110,9 @@ class TestBotRobustness:
         out = bot._reconcile_local_open_trades(local, exchange_has_position=False, mark_price=100.0)
 
         assert out == []
-        assert closed_ids == [10, 11]
+        assert [call[0] for call in closed_calls] == [10, 11]
+        assert [call[1] for call in closed_calls] == [100.0, 100.0]
+        assert [call[2] for call in closed_calls] == [10.0, 20.0]
 
     def test_paper_mode_skips_exchange_for_entry(self, monkeypatch):
         import config

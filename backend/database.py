@@ -265,7 +265,7 @@ def _ensure_symbol_status(conn: sqlite3.Connection, symbol: str) -> None:
     )
 
 
-def update_bot_status(symbol: str = "BTC-USDT", **kwargs) -> None:
+def update_bot_status(symbol: str, **kwargs) -> None:
     unknown = set(kwargs) - _BOT_STATUS_ALLOWED_COLS
     if unknown:
         raise ValueError(f"Unknown bot_status column(s): {unknown}")
@@ -279,7 +279,7 @@ def update_bot_status(symbol: str = "BTC-USDT", **kwargs) -> None:
         )
 
 
-def get_bot_status(symbol: str = "BTC-USDT") -> dict:
+def get_bot_status(symbol: str) -> dict:
     with _connect() as conn:
         _ensure_symbol_status(conn, symbol)
         row = conn.execute(

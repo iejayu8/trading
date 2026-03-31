@@ -21,7 +21,7 @@ from strategy import (
     calculate_sl_tp,
     compute_indicators,
     generate_signal,
-    reset_signal_state as _reset_strategy_state,
+    reset_signal_state as strategy_reset_signal_state,
 )
 
 
@@ -104,7 +104,7 @@ def make_short_trigger_ohlcv(n: int = 700) -> pd.DataFrame:
 
 def reset_signal_state():
     """Reset the module-level cooldown tracker between tests."""
-    _reset_strategy_state()  # clears all symbols
+    strategy_reset_signal_state()  # clears all symbols
 
 
 # ── compute_indicators ────────────────────────────────────────────────────────
@@ -197,16 +197,29 @@ class TestGenerateSignal:
         assert sig in (Signal.LONG, Signal.SHORT, Signal.NONE)
 
     def test_per_symbol_cooldown_independent(self):
-        """Signals for BTC and ETH use independent cooldown counters."""
-        _reset_strategy_state()
+        """Cooldown applies per symbol: BTC can be blocked while ETH still signals."""
+        reset_signal_state()
         df = make_ohlcv(600, trend="up")
         df = compute_indicators(df)
-        # Generate a signal for BTC
-        _last_signal_bar["BTC-USDT"] = len(df) - 1  # set cooldown for BTC
-        # ETH cooldown is unaffected — it can still signal
-        assert "ETH-USDT" not in _last_signal_bar or \
-               _last_signal_bar.get("ETH-USDT", -SIGNAL_COOLDOWN) == -SIGNAL_COOLDOWN or \
-               len(df) - 1 - _last_signal_bar.get("ETH-USDT", -SIGNAL_COOLDOWN) >= SIGNAL_COOLDOWN
+
+        trigger_idx = None
+        for i in range(220, len(df)):
+            window = df.iloc[: i + 1]
+            if generate_signal(window, symbol="BTC-USDT") == Signal.LONG:
+                trigger_idx = i
+                break
+
+        if trigger_idx is None:
+            pytest.fail("Expected to find at least one LONG signal for BTC-USDT")
+
+        window = df.iloc[: trigger_idx + 1]
+        # Same symbol is immediately in cooldown on the same bar.
+        assert generate_signal(window, symbol="BTC-USDT") == Signal.NONE
+        # Different symbol should remain independent and still be able to signal.
+        assert generate_signal(window, symbol="ETH-USDT") == Signal.LONG
+
+        assert _last_signal_bar["BTC-USDT"] == trigger_idx
+        assert _last_signal_bar["ETH-USDT"] == trigger_idx
 
 
 # ── calculate_position_size ───────────────────────────────────────────────────

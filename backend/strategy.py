@@ -62,6 +62,9 @@ from __future__ import annotations
 import pandas as pd
 import numpy as np
 
+# Import policy:
+# Prefer package-relative imports when running as `python -m backend.app`.
+# Keep absolute fallback for direct-module contexts used by tests and some tools.
 try:
     from . import config
 except ImportError:

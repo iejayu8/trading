@@ -122,3 +122,13 @@ class TestDatabase:
         assert btc["last_signal"] == "LONG"
         assert eth["running"] == 0
         assert eth["last_signal"] == "SHORT"
+
+    def test_update_bot_status_requires_symbol(self):
+        """Missing symbol should fail fast to surface migration issues."""
+        with pytest.raises(TypeError):
+            database.update_bot_status(running=1)
+
+    def test_get_bot_status_requires_symbol(self):
+        """Missing symbol should fail fast to surface migration issues."""
+        with pytest.raises(TypeError):
+            database.get_bot_status()

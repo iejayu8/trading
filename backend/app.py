@@ -29,6 +29,9 @@ from typing import TYPE_CHECKING
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
+# Import policy:
+# Prefer package-relative imports when running as `python -m backend.app`.
+# Keep absolute fallback for direct-module contexts used by tests and some tools.
 try:
     from . import config
     from . import database as db
