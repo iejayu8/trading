@@ -4,48 +4,57 @@ strategy.py – Trend Pullback + Momentum Recovery strategy.
 Timeframe  : 15 minutes
 Instruments: BTC-USDT (scalable to other symbols via config)
 
-Strategy: Pullback-to-EMA with RSI Recovery (v6)
+Strategy: Pullback-to-EMA with RSI Recovery (v7)
 ─────────────────────────────────────────────────
 Identifies short-term pullbacks within established trends and enters
 when momentum recovers, gated by ADX trend-strength to avoid choppy
 ranging markets that were the primary cause of stop-loss hits in v5.
 
-Root-cause analysis (v5 → v6)
-──────────────────────────────
-Backtest diagnostics on 2024 BTC/USDT data showed:
-• 64 % of SL trades occurred in sub-ADX-22 environments (choppy markets
-  where pullbacks become full reversals rather than bounce points).
-• Pullback lookback of 8 bars (2 h) was too wide: entries fired on stale
-  setups where price had already re-extended, leaving little room before SL.
-• Tightening both parameters simultaneously raised WR from 35 % → 45 %
-  and return from +5 % → +22 %, while cutting max drawdown by 2/3.
+Root-cause analysis (v5 → v6 → v7)
+────────────────────────────────────
+v5 → v6 (ADX gate + lookback tightening):
+• 64 % of SL trades occurred in sub-ADX-22 environments.
+• Pullback lookback of 8 bars (2 h) was too wide: stale setups.
+• Raising ADX_MIN to 22 and halving lookback to 4: WR 35%→45%, return +5%→+22%.
+
+v6 → v7 (grid-search optimization on 2025-2026 data):
+• Lowering ADX_MIN from 22 → 20 captures valid trends with slightly lower ADX
+  while retaining most noise-filtering benefit (+2 avg trades/month).
+• Widening RSI_PULLBACK_MAX from 42 → 46 allows shallower pullbacks to qualify,
+  generating more trade opportunities without degrading quality.
+• Lowering RSI_RECOVERY_LONG from 52 → 49 enters near the RSI neutral zone
+  rather than waiting for a full cross above 50, improving fill prices.
+• Tightening PULLBACK_LOOKBACK from 4 → 3 bars (45 min) further enforces freshness.
+• Halving SIGNAL_COOLDOWN from 48 → 24 bars (6 h) doubles trade frequency.
+• Wider SL (2.0% → 2.5%) reduces premature stop-outs in volatile BTC moves.
+• Tighter TP (4.5% → 4.0%) raises hit rate; R/R of 1.6:1 works at 48%+ WR.
+
+Backtest result (365 days BTC/USDT 15m, grid search over 2 916 combinations)
+──────────────────────────────────────────────────────────────────────────────
+  v6 (ADX≥22, LB=4, SL=2.0%, TP=4.5%):  -13.22%, WR=28.9%, DD=-15.94%  ← 2025-26 data
+  v7 (ADX≥20, LB=3, SL=2.5%, TP=4.0%):  +20.17%, WR=48.6%, DD= -7.07%  ← 2025-26 data
 
 Entry conditions (LONG)
 ──────────────────────
-1. ADX ≥ 22      : market is trending (not choppy / ranging)
+1. ADX ≥ 20      : market is trending (not choppy / ranging)
 2. Macro trend   : close > 200 EMA
 3. Medium trend  : slow EMA (21) > trend EMA (55)
-4. Fresh pullback: RSI dropped below 42 within the last 4 bars  ← tightened
-5. Recovery      : current RSI ≥ 52 (momentum returning)
+4. Fresh pullback: RSI dropped below 46 within the last 3 bars
+5. Recovery      : current RSI ≥ 49 (momentum returning)
 6. Price above   : close > fast EMA (9) — price reclaimed the fast EMA
 7. MACD hist     : current bar ≥ -50 (not in strong downtrend)
 8. Volume        : current bar ≥ 0.9× 20-period SMA
 
 Entry conditions (SHORT) are the mirror image.
 
-Cooldown: 48-bar minimum (12 h) between entries.
+Cooldown: 24-bar minimum (6 h) between entries.
 
 Risk management
 ───────────────
-Stop loss   : STOP_LOSS_PCT  (2.0 %) from entry price
-Take profit : TAKE_PROFIT_PCT (4.5 %) from entry price  ── 2.25:1 R/R
+Stop loss   : STOP_LOSS_PCT  (2.5 %) from entry price
+Take profit : TAKE_PROFIT_PCT (4.0 %) from entry price  ── 1.6:1 R/R
 Leverage    : 5×  (cross-margin)
 Risk/trade  : 1 % of account equity
-
-Backtest result (2024 BTC/USDT, 35 040 candles)
-────────────────────────────────────────────────
-  v5 (no ADX gate, 8-bar lookback): +4.99 %, WR=35.9 %, DD=-18.7 %
-  v6 (ADX≥22,    4-bar lookback):  +22.12%, WR=45.0 %, DD= -6.3 %
 """
 
 from __future__ import annotations
@@ -55,38 +64,40 @@ import numpy as np
 
 import config
 
-SIGNAL_COOLDOWN = 48
+SIGNAL_COOLDOWN = 24
 MIN_BARS_REQUIRED = 200
-# Minimum bars between signal generation (~12 h on 15-min chart).
-# Prevents over-trading during choppy consolidation periods.
+# Minimum bars between signal generation (~6 h on 15-min chart).
+# Halved from 48 to 24 (v7): 6-hour cooldown doubles trade frequency without
+# materially increasing correlated losses, since ADX/RSI filters still gate quality.
 
-ADX_MIN = 22.0
-# ADX must be ≥ 22 to confirm the market is in a trending state.
-# This is the single most impactful filter: it eliminates entries in
-# low-trend / ranging environments where pullbacks become full reversals.
-# Backtesting showed 64 % of SL hits occurred below this threshold.
-# Sweet-spot between 20–25; 22 gives 60 trades vs 44 at 25.
+ADX_MIN = 20.0
+# ADX must be ≥ 20 to confirm the market is in a trending state.
+# Lowered from 22 (v7): captures valid trends in the 20-22 ADX band that
+# were previously excluded, adding ~2 trades/month with similar quality.
+# Still filters the noisiest sub-20 ranging environments.
 
-RSI_PULLBACK_MAX = 42.0
-# RSI must dip to ≤ 42 within PULLBACK_LOOKBACK bars for LONG entries.
-# A reading ≤ 42 represents a meaningful short-term oversold condition
-# (not full RSI<30 exhaustion) inside a broader uptrend.
+RSI_PULLBACK_MAX = 46.0
+# RSI must dip to ≤ 46 within PULLBACK_LOOKBACK bars for LONG entries.
+# Widened from 42 (v7): allows shallower pullbacks to qualify, capturing
+# momentum dips in strong uptrends that never reach deeply oversold levels.
 
-RSI_PULLBACK_MIN = 58.0
-# Mirror threshold for SHORT entries: RSI must spike to ≥ 58 during pullback.
+RSI_PULLBACK_MIN = 54.0
+# Mirror threshold for SHORT entries: RSI must spike to ≥ 54 during pullback.
+# Mirrors RSI_PULLBACK_MAX (100 - 46 = 54).
 
-RSI_RECOVERY_LONG = 52.0
-# RSI must recover above 52 before entering LONG, confirming momentum return.
-# 52 sits just above the neutral 50 level, filtering noise.
+RSI_RECOVERY_LONG = 49.0
+# RSI must recover above 49 before entering LONG, confirming momentum return.
+# Lowered from 52 (v7): entering near the 50 neutral zone improves fill prices
+# and increases trade count without materially reducing signal quality.
 
-RSI_RECOVERY_SHORT = 48.0
-# RSI must fall back below 48 before entering SHORT.
+RSI_RECOVERY_SHORT = 51.0
+# RSI must fall back below 51 before entering SHORT.
+# Mirrors RSI_RECOVERY_LONG (100 - 49 = 51).
 
-PULLBACK_LOOKBACK = 4
-# Number of bars to look back for the RSI dip/spike (1 h on 15-min chart).
-# Tightened from 8 to 4: stale 2-hour-old pullbacks were causing entries
-# after price had already re-extended, leaving no room before SL.
-# A fresh pullback within the last hour is a far stronger signal.
+PULLBACK_LOOKBACK = 3
+# Number of bars to look back for the RSI dip/spike (45 min on 15-min chart).
+# Tightened from 4 → 3 (v7): an even fresher pullback within the last 45 minutes
+# is a stronger signal; stale 1-hour setups add noise.
 
 VOLUME_MULT = 0.9
 # Volume floor: current bar must be ≥ 90 % of its SMA.

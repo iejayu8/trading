@@ -232,12 +232,12 @@ class TestCalculateSlTp:
         assert tp < 40000
 
     def test_rr_ratio(self):
-        """R/R should be ≥ 2:1 (current config gives ~2.25:1)."""
+        """R/R should be ≥ 1.5:1 (v7 config gives ~1.6:1 with higher win rate)."""
         entry = 40000
         sl, tp = calculate_sl_tp(entry, Signal.LONG)
         risk   = entry - sl
         reward = tp - entry
-        assert reward / risk >= 2.0  # at least 2:1
+        assert reward / risk >= 1.5  # at least 1.5:1
 
     def test_stop_loss_pct_accuracy(self):
         entry = 50000

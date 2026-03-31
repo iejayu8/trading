@@ -73,8 +73,8 @@ VOLUME_SMA_PERIOD: int = 20
 # Risk management
 LEVERAGE: int = _env_int("TRADING_LEVERAGE", 5)
 RISK_PER_TRADE: float = _env_float("RISK_PER_TRADE", 0.01)  # 1 % of equity
-STOP_LOSS_PCT: float = 0.020   # 2.0 % from entry
-TAKE_PROFIT_PCT: float = 0.045  # 4.5 % from entry (~2.25:1 R/R)
+STOP_LOSS_PCT: float = 0.025   # 2.5 % from entry  (optimized v7: wider SL reduces premature stops)
+TAKE_PROFIT_PCT: float = 0.040  # 4.0 % from entry (~1.6:1 R/R, tighter TP raises win rate)
 MAX_DAILY_LOSS_PCT: float = 0.03  # 3 % daily drawdown guard
 TRADING_MARGIN_MODE: str = _env_str("TRADING_MARGIN_MODE", "isolated").lower()
 TRADING_MODE: str = _env_str("TRADING_MODE", "realtrading").lower()
