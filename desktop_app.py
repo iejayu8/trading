@@ -236,6 +236,25 @@ def stop_backend() -> None:
         except subprocess.TimeoutExpired:
             _backend_proc.kill()
 
+    # Belt-and-suspenders: kill any lingering process still bound to port 5000.
+    # On Windows, pywebview.start() occasionally returns without the subprocess
+    # having been fully shut down, leaving a zombie Flask server on the port.
+    try:
+        import subprocess as _sp
+        result = _sp.run(
+            ["netstat", "-ano"],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.splitlines():
+            if ":5000" in line and "LISTENING" in line:
+                parts = line.split()
+                pid = int(parts[-1])
+                if pid and pid != os.getpid():
+                    _sp.run(["taskkill", "/F", "/PID", str(pid)],
+                            capture_output=True, timeout=5)
+    except Exception:
+        pass
+
 
 # ── Desktop window ────────────────────────────────────────────────────────────
 
