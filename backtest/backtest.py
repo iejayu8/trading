@@ -290,7 +290,7 @@ def main() -> None:
     df = load_or_fetch(symbol_upper, days=args.days)
     print(f"\nLoaded {len(df)} candles  ({df.index[0]} → {df.index[-1]})\n")
 
-    bt = Backtest(initial_equity=args.equity)
+    bt = Backtest(initial_equity=args.equity, symbol=blofin_symbol)
     results = bt.run(df)
 
     if "error" in results:

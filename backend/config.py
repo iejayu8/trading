@@ -103,31 +103,86 @@ if PAPER_START_EQUITY <= 0:
 SUPPORTED_SYMBOLS: list[str] = [
     "BTC-USDT",
     "ETH-USDT",
+    "SOL-USDT",
+    "XRP-USDT",
+    "LINK-USDT",
 ]
 
 # ── Per-symbol strategy overrides ─────────────────────────────────────────────
-# ETH-USDT optimized parameters (grid-search on 365-day 15m data).
-# Same strategy logic as BTC-USDT; ETH benefits from tighter SL and higher TP
-# due to its larger intra-day volatility relative to price moves.
+# Each entry may contain any combination of:
+#   stop_loss_pct, take_profit_pct   – risk management (always honoured)
+#   adx_min, rsi_pullback_max, rsi_recovery_long,
+#   pullback_lookback, signal_cooldown  – signal params (override module defaults)
+#
+# Missing keys fall back to the module-level defaults in strategy.py.
 SYMBOL_PARAMS: dict[str, dict] = {
+    # BTC-USDT: v7 grid-search (365-day 15m data).
+    # +20.17% return, WR=48.6%, MaxDD=-7.07%
     "BTC-USDT": {
-        "stop_loss_pct":   STOP_LOSS_PCT,
-        "take_profit_pct": TAKE_PROFIT_PCT,
+        "stop_loss_pct":   STOP_LOSS_PCT,   # 2.5%
+        "take_profit_pct": TAKE_PROFIT_PCT,  # 4.0%
     },
-    # ETH-USDT optimized parameters (grid-search on 365-day 15m data).
-    # ETH benefits from tighter SL (1.5%) and much wider TP (7.0%) because
-    # ETH has sharper momentum bursts relative to noise — the 4.67:1 R/R
-    # compensates for the lower 31.6% win rate.
-    # Backtest result: +25.63% return, WR=31.6%, MaxDD=-6.49%
+    # ETH-USDT: grid-search (365-day 15m data).
+    # ETH benefits from tighter SL and wider TP: sharp momentum bursts with
+    # cleaner moves than BTC noise.
+    # +25.63% return, WR=31.6%, MaxDD=-6.49%
     "ETH-USDT": {
         "stop_loss_pct":   0.015,   # 1.5% — tighter than BTC (ETH moves more cleanly)
         "take_profit_pct": 0.070,   # 7.0% — wider to capture ETH momentum bursts
+    },
+    # SOL-USDT: grid-search (365-day 15m data).
+    # Higher ADX gate (25) filters noisier SOL price action; wide TP (7%) captures
+    # SOL's characteristic strong momentum moves. Longer lookback (6 bars) and
+    # mid-range cooldown (36 bars = 9h) balance frequency with quality.
+    # +28.41% return, WR=24.8%, MaxDD=-14.22%
+    "SOL-USDT": {
+        "stop_loss_pct":    0.015,   # 1.5%
+        "take_profit_pct":  0.070,   # 7.0%
+        "adx_min":          25.0,    # stronger trend gate for volatile SOL
+        "rsi_pullback_max": 42.0,    # tighter pullback requirement
+        "rsi_recovery_long": 55.0,   # stronger recovery confirmation
+        "pullback_lookback": 6,      # wider freshness window (90 min)
+        "signal_cooldown":  36,      # 9-hour cooldown between signals
+    },
+    # XRP-USDT: grid-search (365-day 15m data).
+    # Strict RSI pullback (38) with wide TP (7%) gives excellent 1.801 profit
+    # factor. XRP's tight max drawdown (-4.38%) allows confident deployment.
+    # +27.73% return, WR=32.6%, MaxDD=-4.38%
+    "XRP-USDT": {
+        "stop_loss_pct":    0.015,   # 1.5%
+        "take_profit_pct":  0.070,   # 7.0%
+        "adx_min":          22.0,    # standard ADX gate
+        "rsi_pullback_max": 38.0,    # strict: only deep pullbacks qualify
+        "rsi_recovery_long": 55.0,   # strong recovery required
+        "pullback_lookback": 6,      # 90-min freshness window
+        "signal_cooldown":  24,      # 6-hour cooldown
+    },
+    # LINK-USDT: wide grid-search (365-day 15m data).
+    # LINK was -35.6% on the year (strong downtrend Q3/Q4) so the strategy
+    # captures short-side momentum. Lower ADX gate (15) and tighter SL (1%)
+    # with conservative TP (5.5%) gives the best Calmar ratio.
+    # +27.41% return, WR=25.0%, MaxDD=-8.94%
+    "LINK-USDT": {
+        "stop_loss_pct":    0.010,   # 1.0% — tight SL for volatile LINK
+        "take_profit_pct":  0.055,   # 5.5%
+        "adx_min":          15.0,    # lower gate: LINK trends at lower ADX
+        "rsi_pullback_max": 38.0,    # strict pullback (only deep dips)
+        "rsi_recovery_long": 58.0,   # stronger confirmation (above 58)
+        "pullback_lookback": 8,      # 2-hour freshness window
+        "signal_cooldown":  48,      # 12-hour cooldown (conservative)
     },
 }
 
 
 def get_symbol_params(symbol: str) -> dict:
-    """Return stop_loss_pct and take_profit_pct for *symbol*."""
+    """Return all per-symbol strategy and risk parameters for *symbol*.
+
+    Always contains ``stop_loss_pct`` and ``take_profit_pct``.
+    May also contain strategy-level overrides: ``adx_min``,
+    ``rsi_pullback_max``, ``rsi_recovery_long``, ``pullback_lookback``,
+    ``signal_cooldown``.  Keys absent from the override dict fall back to
+    the module-level defaults in ``strategy.py``.
+    """
     return SYMBOL_PARAMS.get(symbol, {
         "stop_loss_pct":   STOP_LOSS_PCT,
         "take_profit_pct": TAKE_PROFIT_PCT,
