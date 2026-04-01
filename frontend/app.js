@@ -261,7 +261,7 @@ async function refreshTradeHistory() {
   const tbody = document.querySelector('#trade-table tbody');
   tbody.innerHTML = '';
   if (!trades.length) {
-    tbody.innerHTML = '<tr><td colspan="12" class="empty-msg" style="padding:12px">No trades yet</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="14" class="empty-msg" style="padding:12px">No trades yet</td></tr>';
     return;
   }
 
@@ -272,6 +272,25 @@ async function refreshTradeHistory() {
       : '–';
     const dirCls = t.direction === 'LONG' ? 'text-green' : 'text-red';
     const value = Number(t.size) * Number(t.entry_price);
+
+    const entry = Number(t.entry_price);
+    const size  = Number(t.size);
+    const isLong = t.direction === 'LONG';
+
+    let slLossStr = '–';
+    if (t.sl_price != null) {
+      const sl = Number(t.sl_price);
+      const slLoss = isLong ? (sl - entry) * size : (entry - sl) * size;
+      slLossStr = `<span class="text-red">${slLoss.toFixed(2)}</span>`;
+    }
+
+    let tpProfitStr = '–';
+    if (t.tp_price != null) {
+      const tp = Number(t.tp_price);
+      const tpProfit = isLong ? (tp - entry) * size : (entry - tp) * size;
+      tpProfitStr = `<span class="text-green">+${tpProfit.toFixed(2)}</span>`;
+    }
+
     tbody.innerHTML += `
       <tr>
         <td>${t.id}</td>
@@ -283,6 +302,8 @@ async function refreshTradeHistory() {
         <td>$${value.toFixed(2)}</td>
         <td class="text-red">${formatPrice(t.sl_price)}</td>
         <td class="text-green">${formatPrice(t.tp_price)}</td>
+        <td>${slLossStr}</td>
+        <td>${tpProfitStr}</td>
         <td>${pnlStr}</td>
         <td>${statusBadge(t.status)}</td>
         <td>${fmtTs(t.opened_at)}</td>
