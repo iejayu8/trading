@@ -354,4 +354,5 @@ if __name__ == "__main__":
         )
         sys.exit(1)
     db.init_db()
+    db.log_event("Server started")
     app.run(host="0.0.0.0", port=5000, debug=False)

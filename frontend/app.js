@@ -405,16 +405,20 @@ async function refreshLogs() {
   try { logs = await fetchJSON(`${API}/logs?limit=60`); } catch { return; }
 
   const container = document.getElementById('log-container');
-  container.innerHTML = '';
-  const orderedLogs = [...logs].reverse();
-  orderedLogs.forEach(l => {
-    container.innerHTML += `
-      <div class="log-entry">
-        <span class="log-ts">${fmtTs(l.ts)}</span>
-        <span class="log-level-${l.level}">[${l.level}]</span>
-        <span>${escHtml(l.message)}</span>
-      </div>`;
-  });
+
+  if (!logs || logs.length === 0) {
+    container.innerHTML = '<div class="log-empty">No activity yet — start the bot to begin logging.</div>';
+    return;
+  }
+
+  const html = [...logs].reverse().map(l => `
+    <div class="log-entry">
+      <span class="log-ts">${fmtTs(l.ts)}</span>
+      <span class="log-level-${l.level}">[${l.level}]</span>
+      <span>${escHtml(l.message)}</span>
+    </div>`).join('');
+
+  container.innerHTML = html;
   container.scrollTop = container.scrollHeight;
 }
 

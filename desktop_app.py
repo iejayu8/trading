@@ -183,6 +183,7 @@ def _run_embedded_backend() -> None:
         from backend import database as db
 
         db.init_db()
+        db.log_event("Server started")
         backend_app_module.app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False)
     except Exception as exc:  # pragma: no cover - only exercised in packaged app runtime
         _backend_error = str(exc)
