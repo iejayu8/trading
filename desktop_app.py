@@ -188,9 +188,27 @@ def _run_embedded_backend() -> None:
         _backend_error = str(exc)
 
 
+def _is_backend_running() -> bool:
+    """Return True if a backend is already responding on port 5000."""
+    try:
+        r = requests.get(f"{BACKEND_URL}/api/status", timeout=2)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
 def start_backend() -> subprocess.Popen | None:
-    """Launch the Flask backend (thread in frozen mode, subprocess in source mode)."""
+    """Launch the Flask backend (thread in frozen mode, subprocess in source mode).
+
+    If a backend is already listening on port 5000 it is reused – no new
+    process is spawned.  This prevents duplicate instances when the desktop
+    app is opened more than once.
+    """
     global _backend_proc, _backend_thread
+
+    if _is_backend_running():
+        print("INFO: Backend already running on port 5000 – reusing existing instance.", flush=True)
+        return None
 
     credentials = _load_credentials()
     env = os.environ.copy()
@@ -235,6 +253,25 @@ def stop_backend() -> None:
             _backend_proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             _backend_proc.kill()
+
+    # Belt-and-suspenders: kill any lingering process still bound to port 5000.
+    # On Windows, pywebview.start() occasionally returns without the subprocess
+    # having been fully shut down, leaving a zombie Flask server on the port.
+    try:
+        import subprocess as _sp
+        result = _sp.run(
+            ["netstat", "-ano"],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.splitlines():
+            if ":5000" in line and "LISTENING" in line:
+                parts = line.split()
+                pid = int(parts[-1])
+                if pid and pid != os.getpid():
+                    _sp.run(["taskkill", "/F", "/PID", str(pid)],
+                            capture_output=True, timeout=5)
+    except Exception:
+        pass
 
 
 # ── Desktop window ────────────────────────────────────────────────────────────
