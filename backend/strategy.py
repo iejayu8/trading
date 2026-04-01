@@ -2,7 +2,9 @@
 strategy.py – Trend Pullback + Momentum Recovery strategy.
 
 Timeframe  : 15 minutes
-Instruments: BTC-USDT (scalable to other symbols via config)
+Instruments: BTC-USDT, ETH-USDT, SOL-USDT, XRP-USDT, LINK-USDT
+             (all symbols use the same strategy logic with per-symbol
+              parameter overrides stored in config.SYMBOL_PARAMS)
 
 Strategy: Pullback-to-EMA with RSI Recovery (v7)
 ─────────────────────────────────────────────────
@@ -198,8 +200,12 @@ def generate_signal(df: pd.DataFrame, symbol: str = "BTC-USDT") -> str:
     if len(df) < MIN_BARS_REQUIRED:
         return Signal.NONE
 
+    sym_params = config.get_symbol_params(symbol)
+    cooldown   = sym_params.get("signal_cooldown", SIGNAL_COOLDOWN)
+    adx_min    = sym_params.get("adx_min", ADX_MIN)
+
     current_bar = len(df) - 1
-    if current_bar - _get_last_bar(symbol) < SIGNAL_COOLDOWN:
+    if current_bar - _get_last_bar(symbol) < cooldown:
         return Signal.NONE
 
     last = df.iloc[-1]
@@ -210,10 +216,10 @@ def generate_signal(df: pd.DataFrame, symbol: str = "BTC-USDT") -> str:
 
     # ADX gate: only trade when the market is in a trending state.
     # Entries in low-ADX choppy markets are the primary source of SL hits.
-    if last["adx"] < ADX_MIN:
+    if last["adx"] < adx_min:
         return Signal.NONE
 
-    checks = get_signal_checks(df)
+    checks = get_signal_checks(df, sym_params)
 
     # ── Long: fresh pullback + recovery within uptrend ─────────────────────
     if all(checks["long_checks"].values()):
@@ -237,6 +243,9 @@ def get_signal_diagnostics(df: pd.DataFrame, symbol: str = "BTC-USDT") -> dict:
     min_bars = MIN_BARS_REQUIRED
     current_bar = len(df) - 1
 
+    sym_params = config.get_symbol_params(symbol)
+    cooldown   = sym_params.get("signal_cooldown", SIGNAL_COOLDOWN)
+
     out = {
         "long_ready": False,
         "short_ready": False,
@@ -249,7 +258,7 @@ def get_signal_diagnostics(df: pd.DataFrame, symbol: str = "BTC-USDT") -> dict:
         return out
 
     bars_since = current_bar - _get_last_bar(symbol)
-    cooldown_left = SIGNAL_COOLDOWN - bars_since
+    cooldown_left = cooldown - bars_since
     if cooldown_left > 0:
         out["signal_hint"] = "COOLDOWN"
         out["waiting_for"] = f"Cooldown active ({cooldown_left} bars left)"
@@ -264,7 +273,7 @@ def get_signal_diagnostics(df: pd.DataFrame, symbol: str = "BTC-USDT") -> dict:
         out["waiting_for"] = "Warming up indicators"
         return out
 
-    checks = get_signal_checks(df)
+    checks = get_signal_checks(df, sym_params)
     long_checks = checks["long_checks"]
     short_checks = checks["short_checks"]
 
@@ -293,8 +302,13 @@ def get_signal_diagnostics(df: pd.DataFrame, symbol: str = "BTC-USDT") -> dict:
     return out
 
 
-def get_signal_checks(df: pd.DataFrame) -> dict:
-    """Return per-side checks and current indicator values used for entry decisions."""
+def get_signal_checks(df: pd.DataFrame, sym_params: dict | None = None) -> dict:
+    """Return per-side checks and current indicator values used for entry decisions.
+
+    *sym_params* may contain per-symbol overrides for strategy thresholds
+    (adx_min, rsi_pullback_max, rsi_recovery_long, pullback_lookback).
+    Falls back to module-level defaults when keys are absent.
+    """
     if df.empty:
         return {
             "long_checks": {},
@@ -302,28 +316,38 @@ def get_signal_checks(df: pd.DataFrame) -> dict:
             "values": {},
         }
 
+    if sym_params is None:
+        sym_params = {}
+
+    adx_min           = sym_params.get("adx_min",           ADX_MIN)
+    rsi_pullback_max  = sym_params.get("rsi_pullback_max",  RSI_PULLBACK_MAX)
+    rsi_pullback_min  = 100.0 - rsi_pullback_max
+    rsi_recovery_long = sym_params.get("rsi_recovery_long", RSI_RECOVERY_LONG)
+    rsi_recovery_short = 100.0 - rsi_recovery_long
+    pullback_lookback  = sym_params.get("pullback_lookback", PULLBACK_LOOKBACK)
+
     last = df.iloc[-1]
-    rsi_window = df["rsi"].iloc[-(PULLBACK_LOOKBACK + 1):-1]
+    rsi_window = df["rsi"].iloc[-(pullback_lookback + 1):-1]
     vol_threshold = VOLUME_MULT * last["volume_sma"] if pd.notna(last["volume_sma"]) else np.nan
     vol_ok = pd.notna(last["volume"]) and pd.notna(vol_threshold) and last["volume"] >= vol_threshold
 
     long_checks = {
-        "ADX >= threshold": bool(last["adx"] >= ADX_MIN),
+        "ADX >= threshold": bool(last["adx"] >= adx_min),
         "Price above EMA200": bool(last["close"] > last["ema_200"]),
         "EMA21 above EMA55": bool(last["ema_slow"] > last["ema_trend"]),
-        "Recent RSI pullback": bool((rsi_window <= RSI_PULLBACK_MAX).any()),
-        "RSI recovered": bool(last["rsi"] >= RSI_RECOVERY_LONG),
+        "Recent RSI pullback": bool((rsi_window <= rsi_pullback_max).any()),
+        "RSI recovered": bool(last["rsi"] >= rsi_recovery_long),
         "Price above EMA9": bool(last["close"] > last["ema_fast"]),
         "MACD filter": bool(last["macd_hist"] >= -50),
         "Volume filter": bool(vol_ok),
     }
 
     short_checks = {
-        "ADX >= threshold": bool(last["adx"] >= ADX_MIN),
+        "ADX >= threshold": bool(last["adx"] >= adx_min),
         "Price below EMA200": bool(last["close"] < last["ema_200"]),
         "EMA21 below EMA55": bool(last["ema_slow"] < last["ema_trend"]),
-        "Recent RSI spike": bool((rsi_window >= RSI_PULLBACK_MIN).any()),
-        "RSI rejected": bool(last["rsi"] <= RSI_RECOVERY_SHORT),
+        "Recent RSI spike": bool((rsi_window >= rsi_pullback_min).any()),
+        "RSI rejected": bool(last["rsi"] <= rsi_recovery_short),
         "Price below EMA9": bool(last["close"] < last["ema_fast"]),
         "MACD filter": bool(last["macd_hist"] <= 50),
         "Volume filter": bool(vol_ok),
@@ -341,9 +365,9 @@ def get_signal_checks(df: pd.DataFrame) -> dict:
         "volume_threshold": float(vol_threshold) if pd.notna(vol_threshold) else None,
         "adx": float(last["adx"]),
         "macd_hist": float(last["macd_hist"]),
-        "rsi_recovery_long": RSI_RECOVERY_LONG,
-        "rsi_recovery_short": RSI_RECOVERY_SHORT,
-        "adx_min": ADX_MIN,
+        "rsi_recovery_long": rsi_recovery_long,
+        "rsi_recovery_short": rsi_recovery_short,
+        "adx_min": adx_min,
     }
 
     return {

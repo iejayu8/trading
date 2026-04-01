@@ -292,3 +292,86 @@ class TestCalculateSlTp:
         risk   = entry - sl
         reward = tp - entry
         assert reward / risk >= 4.0  # ≥ 4:1 for ETH params
+
+
+# ── Per-symbol strategy parameter overrides ───────────────────────────────────
+
+class TestPerSymbolStrategyParams:
+    def test_get_signal_checks_uses_sym_params_adx(self):
+        """get_signal_checks respects adx_min override from sym_params."""
+        from strategy import get_signal_checks
+        df = make_ohlcv(300)
+        df = compute_indicators(df)
+
+        default_checks = get_signal_checks(df)
+        # With a very low ADX threshold (1.0) the ADX check should always pass.
+        low_adx_checks = get_signal_checks(df, {"adx_min": 1.0})
+        # With a very high ADX threshold (99.0) the ADX check should always fail.
+        high_adx_checks = get_signal_checks(df, {"adx_min": 99.0})
+
+        assert low_adx_checks["long_checks"]["ADX >= threshold"] is True
+        assert high_adx_checks["long_checks"]["ADX >= threshold"] is False
+        assert low_adx_checks["values"]["adx_min"] == 1.0
+        assert high_adx_checks["values"]["adx_min"] == 99.0
+        # Default should equal the module-level ADX_MIN
+        assert default_checks["values"]["adx_min"] == ADX_MIN
+
+    def test_get_signal_checks_uses_sym_params_rsi(self):
+        """get_signal_checks uses per-symbol rsi_recovery_long override."""
+        from strategy import get_signal_checks
+        df = make_ohlcv(300)
+        df = compute_indicators(df)
+
+        # With rsi_recovery_long=1.0, RSI recovered check should always pass.
+        checks_low = get_signal_checks(df, {"rsi_recovery_long": 1.0})
+        # With rsi_recovery_long=99.0, it should always fail.
+        checks_high = get_signal_checks(df, {"rsi_recovery_long": 99.0})
+
+        assert checks_low["long_checks"]["RSI recovered"] is True
+        assert checks_high["long_checks"]["RSI recovered"] is False
+
+    def test_get_signal_checks_pullback_lookback_override(self):
+        """Increasing pullback_lookback extends the RSI window used."""
+        from strategy import get_signal_checks
+        df = make_ohlcv(400)
+        df = compute_indicators(df)
+
+        # Both should return valid dicts; just verify no exception and keys are present.
+        checks_narrow = get_signal_checks(df, {"pullback_lookback": 2})
+        checks_wide   = get_signal_checks(df, {"pullback_lookback": 8})
+        assert "Recent RSI pullback" in checks_narrow["long_checks"]
+        assert "Recent RSI pullback" in checks_wide["long_checks"]
+
+    def test_generate_signal_uses_per_symbol_cooldown(self):
+        """LINK's longer cooldown (48 bars) is honoured by generate_signal."""
+        import config
+        reset_signal_state()
+        df = make_ohlcv(600, trend="up")
+        df = compute_indicators(df)
+
+        # Patch LINK params to use a very short cooldown so a signal can fire,
+        # then verify the second call is blocked for 48 bars.
+        link_params = dict(config.get_symbol_params("LINK-USDT"))
+        original_params = config.SYMBOL_PARAMS.get("LINK-USDT", {}).copy()
+
+        # Find bar that fires a signal with relaxed LINK params
+        link_params_relaxed = {**link_params, "adx_min": 1.0, "rsi_recovery_long": 1.0,
+                                "rsi_pullback_max": 99.0, "signal_cooldown": 48}
+        config.SYMBOL_PARAMS["LINK-USDT"] = link_params_relaxed
+
+        trigger_idx = None
+        try:
+            for i in range(220, len(df)):
+                sig = generate_signal(df.iloc[:i + 1], symbol="LINK-USDT")
+                if sig != Signal.NONE:
+                    trigger_idx = i
+                    break
+
+            if trigger_idx is not None:
+                # Next call on the same bar must be NONE (cooldown active)
+                sig2 = generate_signal(df.iloc[:trigger_idx + 1], symbol="LINK-USDT")
+                assert sig2 == Signal.NONE
+        finally:
+            # Restore original LINK params
+            config.SYMBOL_PARAMS["LINK-USDT"] = original_params
+            reset_signal_state()

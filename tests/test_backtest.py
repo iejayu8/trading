@@ -122,3 +122,52 @@ class TestBacktest:
         # If trades occurred, verify the result keys are correct
         if "return_pct" in result_eth:
             assert "win_rate_pct" in result_eth
+
+    def test_sol_symbol_backtest_valid(self):
+        """SOL-USDT backtest uses its own optimized params (ADX=25, SL=1.5%, TP=7%)."""
+        df = make_ohlcv(600)
+        bt = Backtest(initial_equity=1000.0, symbol="SOL-USDT")
+        result = bt.run(df)
+        assert isinstance(result, dict)
+        if "return_pct" in result:
+            assert "win_rate_pct" in result
+            assert "max_drawdown_pct" in result
+
+    def test_xrp_symbol_backtest_valid(self):
+        """XRP-USDT backtest uses its own optimized params (ADX=22, SL=1.5%, TP=7%)."""
+        df = make_ohlcv(600)
+        bt = Backtest(initial_equity=1000.0, symbol="XRP-USDT")
+        result = bt.run(df)
+        assert isinstance(result, dict)
+        if "return_pct" in result:
+            assert "win_rate_pct" in result
+
+    def test_link_symbol_backtest_valid(self):
+        """LINK-USDT backtest uses its own optimized params (ADX=15, SL=1%, TP=5.5%)."""
+        df = make_ohlcv(600)
+        bt = Backtest(initial_equity=1000.0, symbol="LINK-USDT")
+        result = bt.run(df)
+        assert isinstance(result, dict)
+        if "return_pct" in result:
+            assert "win_rate_pct" in result
+
+    def test_all_new_symbols_in_supported_symbols(self):
+        """All new symbols are registered in config.SUPPORTED_SYMBOLS."""
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
+        import config
+        for sym in ["SOL-USDT", "XRP-USDT", "LINK-USDT"]:
+            assert sym in config.SUPPORTED_SYMBOLS
+
+    def test_new_symbols_have_optimized_sl_tp(self):
+        """Each new symbol returns distinct (non-default) SL/TP from config."""
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
+        import config
+        btc_params = config.get_symbol_params("BTC-USDT")
+        for sym in ["SOL-USDT", "XRP-USDT", "LINK-USDT"]:
+            params = config.get_symbol_params(sym)
+            # Each new symbol has explicitly defined SL/TP
+            assert params["stop_loss_pct"] != btc_params["stop_loss_pct"] or \
+                   params["take_profit_pct"] != btc_params["take_profit_pct"], \
+                   f"{sym} should have at least one param different from BTC defaults"

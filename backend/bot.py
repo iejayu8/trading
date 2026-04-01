@@ -391,7 +391,7 @@ class TradingBot:
         daily_pnl = sum(
             t["pnl"] or 0
             for t in trades
-            if t.get("closed_at", "").startswith(today)
+            if (t.get("closed_at") or "").startswith(today)
         )
         if current_equity > 0:
             return (daily_pnl / current_equity) < -config.MAX_DAILY_LOSS_PCT

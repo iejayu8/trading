@@ -274,20 +274,20 @@ def _run_fast(
 
 
 def _score(r: dict) -> float:
-        """
-        Calmar-like objective: return per unit of max drawdown.
+    """
+    Calmar-like objective: return per unit of max drawdown.
 
-        Why this metric for grid search:
-        - We want parameter sets that grow equity while controlling worst pain,
-            not just those with high raw return.
-        - Sharpe ratio is less reliable here because we optimize on discrete trade
-            outcomes (not a smooth return series) and no risk-free adjustment is used.
-        - Profit factor ignores equity-path risk; two setups can have similar PF but
-            very different drawdowns.
+    Why this metric for grid search:
+    - We want parameter sets that grow equity while controlling worst pain,
+      not just those with high raw return.
+    - Sharpe ratio is less reliable here because we optimize on discrete trade
+      outcomes (not a smooth return series) and no risk-free adjustment is used.
+    - Profit factor ignores equity-path risk; two setups can have similar PF but
+      very different drawdowns.
 
-        Using return / |drawdown| gives a simple, stable ranking aligned with the
-        bot's capital-preservation goal.
-        """
+    Using return / |drawdown| gives a simple, stable ranking aligned with the
+    bot's capital-preservation goal.
+    """
     dd = abs(r["max_drawdown_pct"]) or 1.0
     return r["return_pct"] / dd
 

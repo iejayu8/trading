@@ -216,6 +216,16 @@ def api_stop():
 def api_config():
     symbol = request.args.get("symbol", config.TRADING_SYMBOL)
     sym_params = config.get_symbol_params(symbol)
+    # Import strategy defaults for fallback display values
+    try:
+        from .strategy import ADX_MIN, RSI_PULLBACK_MAX, RSI_RECOVERY_LONG, PULLBACK_LOOKBACK, SIGNAL_COOLDOWN
+    except ImportError:
+        _s = importlib.import_module("strategy")
+        ADX_MIN = _s.ADX_MIN
+        RSI_PULLBACK_MAX = _s.RSI_PULLBACK_MAX
+        RSI_RECOVERY_LONG = _s.RSI_RECOVERY_LONG
+        PULLBACK_LOOKBACK = _s.PULLBACK_LOOKBACK
+        SIGNAL_COOLDOWN = _s.SIGNAL_COOLDOWN
     return jsonify(
         {
             "symbol": symbol,
@@ -226,6 +236,11 @@ def api_config():
             "risk_per_trade_pct": config.RISK_PER_TRADE * 100,
             "stop_loss_pct": sym_params["stop_loss_pct"] * 100,
             "take_profit_pct": sym_params["take_profit_pct"] * 100,
+            "adx_min": sym_params.get("adx_min", ADX_MIN),
+            "rsi_pullback_max": sym_params.get("rsi_pullback_max", RSI_PULLBACK_MAX),
+            "rsi_recovery_long": sym_params.get("rsi_recovery_long", RSI_RECOVERY_LONG),
+            "pullback_lookback": sym_params.get("pullback_lookback", PULLBACK_LOOKBACK),
+            "signal_cooldown": sym_params.get("signal_cooldown", SIGNAL_COOLDOWN),
             "fast_ema": config.FAST_EMA,
             "slow_ema": config.SLOW_EMA,
             "trend_ema": config.TREND_EMA,
@@ -267,9 +282,10 @@ def api_market_context():
     df = df.set_index("datetime").sort_index()
 
     df = compute_indicators(df)
-    diagnostics = get_signal_diagnostics(df, symbol=symbol)
-    checks = get_signal_checks(df)
-    values = checks.get("values", {})
+    sym_params   = config.get_symbol_params(symbol)
+    diagnostics  = get_signal_diagnostics(df, symbol=symbol)
+    checks       = get_signal_checks(df, sym_params)
+    values       = checks.get("values", {})
 
     candles = []
     for ts, row in df.tail(limit).iterrows():
