@@ -193,7 +193,8 @@ class TradingBot:
 
         # ── Enter new position ────────────────────────────────────────────────
         if signal != Signal.NONE and not open_trades and not exchange_has_pos and equity:
-            self._enter_trade(signal, last_price, equity)
+            if self._portfolio_allows_entry(equity, last_price):
+                self._enter_trade(signal, last_price, equity)
 
     # ── Trade management ──────────────────────────────────────────────────────
 
@@ -252,6 +253,87 @@ class TradingBot:
 
                 if self.paper_trading:
                     db.log_event(f"[PAPER] Simulated close for trade {trade['id']}")
+
+    def _portfolio_allows_entry(self, equity: float, new_price: float) -> bool:
+        """Return True if opening a new position passes all portfolio-level caps.
+
+        Checks four limits (all configurable via env vars):
+          1. MAX_OPEN_POSITIONS  – hard cap on simultaneous open trades.
+          2. MAX_MARGIN_USAGE_PCT – total margin in use must not exceed x% of equity.
+          3. MAX_PORTFOLIO_RISK_PCT – total worst-case SL loss across all open trades
+                                      must not exceed x% of equity.
+          4. MAX_SYMBOL_EXPOSURE_PCT – no single symbol's notional may exceed x% of
+                                        the allowed notional cap.
+        """
+        all_open = db.get_open_trades()  # across ALL symbols
+
+        # 1. Max simultaneous positions
+        if len(all_open) >= config.MAX_OPEN_POSITIONS:
+            db.log_event(
+                f"Portfolio cap: MAX_OPEN_POSITIONS ({config.MAX_OPEN_POSITIONS}) reached "
+                f"– skipping entry for {self.symbol}",
+                level="WARNING",
+            )
+            return False
+
+        # Aggregate existing exposure
+        total_notional = 0.0
+        total_margin = 0.0
+        total_risk = 0.0
+        symbol_notional: dict[str, float] = {}
+
+        for t in all_open:
+            notional = t["size"] * t["entry_price"]
+            margin = notional / self.leverage
+            # Risk = distance from entry to SL × size
+            risk = t["size"] * abs(t["entry_price"] - t["sl_price"])
+            total_notional += notional
+            total_margin += margin
+            total_risk += risk
+            sym = t.get("symbol", "")
+            symbol_notional[sym] = symbol_notional.get(sym, 0.0) + notional
+
+        # Values for the prospective new trade
+        new_risk = equity * config.RISK_PER_TRADE            # by construction of calculate_position_size
+        new_notional = new_risk / self._stop_loss_pct        # size * price = risk / sl_pct
+        new_margin = new_notional / self.leverage
+
+        # 2. Margin cap
+        margin_cap = equity * config.MAX_MARGIN_USAGE_PCT
+        if total_margin + new_margin > margin_cap:
+            db.log_event(
+                f"Portfolio cap: margin {total_margin + new_margin:.2f} would exceed "
+                f"{margin_cap:.2f} ({config.MAX_MARGIN_USAGE_PCT*100:.0f}% of equity) "
+                f"– skipping entry for {self.symbol}",
+                level="WARNING",
+            )
+            return False
+
+        # 3. Portfolio risk cap
+        risk_cap = equity * config.MAX_PORTFOLIO_RISK_PCT
+        if total_risk + new_risk > risk_cap:
+            db.log_event(
+                f"Portfolio cap: risk {total_risk + new_risk:.2f} would exceed "
+                f"{risk_cap:.2f} ({config.MAX_PORTFOLIO_RISK_PCT*100:.0f}% of equity) "
+                f"– skipping entry for {self.symbol}",
+                level="WARNING",
+            )
+            return False
+
+        # 4. Per-symbol notional concentration
+        notional_cap = equity * config.MAX_MARGIN_USAGE_PCT * self.leverage  # total allowed notional
+        sym_notional_after = symbol_notional.get(self.symbol, 0.0) + new_notional
+        sym_limit = notional_cap * config.MAX_SYMBOL_EXPOSURE_PCT
+        if sym_notional_after > sym_limit:
+            db.log_event(
+                f"Portfolio cap: {self.symbol} notional {sym_notional_after:.2f} would exceed "
+                f"per-symbol limit {sym_limit:.2f} ({config.MAX_SYMBOL_EXPOSURE_PCT*100:.0f}% of cap) "
+                f"– skipping entry for {self.symbol}",
+                level="WARNING",
+            )
+            return False
+
+        return True
 
     def _enter_trade(
         self, signal: str, price: float, equity: float
