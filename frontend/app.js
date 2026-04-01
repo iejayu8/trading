@@ -231,9 +231,9 @@ async function loadConfig(sym) {
     ['Trading Mode',     mode],
     ['Timeframe',        cfg.timeframe],
     ['Leverage',         `${cfg.leverage}×`],
-    ['Risk / Trade',     `${cfg.risk_per_trade_pct}%`],
-    ['Stop Loss',        `${cfg.stop_loss_pct}%`],
-    ['Take Profit',      `${cfg.take_profit_pct}%`],
+    ['Risk / Trade',     `${Number(cfg.risk_per_trade_pct).toFixed(2)}%`],
+    ['Stop Loss',        `${Number(cfg.stop_loss_pct).toFixed(2)}%`],
+    ['Take Profit',      `${Number(cfg.take_profit_pct).toFixed(2)}%`],
     ['Fast EMA',         cfg.fast_ema],
     ['Slow EMA',         cfg.slow_ema],
     ['Trend EMA',        cfg.trend_ema],
@@ -276,6 +276,7 @@ async function refreshOpenTrades() {
         <div class="direction ${pnlCls}">${dir} ${t.symbol}</div>
         <div class="pos-row"><label>Entry</label><span>${formatPrice(t.entry_price)}</span></div>
         <div class="pos-row"><label>Size</label><span>${t.size}</span></div>
+        <div class="pos-row"><label>Value</label><span>$${(Number(t.size) * Number(t.entry_price)).toFixed(2)}</span></div>
         <div class="pos-row"><label>SL</label><span class="text-red">${formatPrice(t.sl_price)}</span></div>
         <div class="pos-row"><label>TP</label><span class="text-green">${formatPrice(t.tp_price)}</span></div>
         <div class="pos-row"><label>Leverage</label><span>${t.leverage}×</span></div>
@@ -292,7 +293,7 @@ async function refreshTradeHistory() {
   const tbody = document.querySelector('#trade-table tbody');
   tbody.innerHTML = '';
   if (!trades.length) {
-    tbody.innerHTML = '<tr><td colspan="10" class="empty-msg" style="padding:12px">No trades yet</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12" class="empty-msg" style="padding:12px">No trades yet</td></tr>';
     return;
   }
 
@@ -302,13 +303,16 @@ async function refreshTradeHistory() {
       ? `<span class="${pnl >= 0 ? 'text-green' : 'text-red'}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}</span>`
       : '–';
     const dirCls = t.direction === 'LONG' ? 'text-green' : 'text-red';
+    const value = Number(t.size) * Number(t.entry_price);
     tbody.innerHTML += `
       <tr>
         <td>${t.id}</td>
+        <td><strong>${t.symbol}</strong></td>
         <td class="${dirCls}"><strong>${t.direction}</strong></td>
         <td>${formatPrice(t.entry_price)}</td>
         <td>${t.exit_price ? formatPrice(t.exit_price) : '–'}</td>
         <td>${t.size}</td>
+        <td>$${value.toFixed(2)}</td>
         <td class="text-red">${formatPrice(t.sl_price)}</td>
         <td class="text-green">${formatPrice(t.tp_price)}</td>
         <td>${pnlStr}</td>
