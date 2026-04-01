@@ -76,6 +76,23 @@ RISK_PER_TRADE: float = _env_float("RISK_PER_TRADE", 0.01)  # 1 % of equity
 STOP_LOSS_PCT: float = 0.025   # 2.5 % from entry  (optimized v7: wider SL reduces premature stops)
 TAKE_PROFIT_PCT: float = 0.040  # 4.0 % from entry (~1.6:1 R/R, tighter TP raises win rate)
 MAX_DAILY_LOSS_PCT: float = 0.03  # 3 % daily drawdown guard
+
+# Portfolio-level caps (multi-symbol guard)
+# These prevent all running bots from collectively over-allocating equity.
+MAX_OPEN_POSITIONS: int = _env_int("MAX_OPEN_POSITIONS", 3)
+MAX_MARGIN_USAGE_PCT: float = _env_float("MAX_MARGIN_USAGE_PCT", 0.40)     # 40 % of equity as margin
+MAX_PORTFOLIO_RISK_PCT: float = _env_float("MAX_PORTFOLIO_RISK_PCT", 0.03)  # 3 % equity at risk across all stops
+MAX_SYMBOL_EXPOSURE_PCT: float = _env_float("MAX_SYMBOL_EXPOSURE_PCT", 0.50)  # no symbol > 50 % of notional cap
+
+if MAX_OPEN_POSITIONS < 1:
+    MAX_OPEN_POSITIONS = 1
+if MAX_MARGIN_USAGE_PCT <= 0 or MAX_MARGIN_USAGE_PCT > 1:
+    MAX_MARGIN_USAGE_PCT = 0.40
+if MAX_PORTFOLIO_RISK_PCT <= 0 or MAX_PORTFOLIO_RISK_PCT > 1:
+    MAX_PORTFOLIO_RISK_PCT = 0.03
+if MAX_SYMBOL_EXPOSURE_PCT <= 0 or MAX_SYMBOL_EXPOSURE_PCT > 1:
+    MAX_SYMBOL_EXPOSURE_PCT = 0.50
+
 TRADING_MARGIN_MODE: str = _env_str("TRADING_MARGIN_MODE", "isolated").lower()
 TRADING_MODE: str = _env_str("TRADING_MODE", "realtrading").lower()
 PAPER_START_EQUITY: float = _env_float("PAPER_START_EQUITY", 1000.0)
