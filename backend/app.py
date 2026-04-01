@@ -23,6 +23,8 @@ GET  /api/market/context       – live chart + indicators (?symbol=X)
 from __future__ import annotations
 
 import os
+import socket
+import sys
 import threading
 from typing import TYPE_CHECKING
 
@@ -336,6 +338,20 @@ def api_market_context():
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
+def _port_is_free(port: int) -> bool:
+    """Return True if nothing is listening on *port* on localhost."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(1)
+        return sock.connect_ex(("127.0.0.1", port)) != 0
+
+
 if __name__ == "__main__":
+    if not _port_is_free(5000):
+        print(
+            "ERROR: Another instance of the trading bot is already running on port 5000.\n"
+            "Close it before starting a new one.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     db.init_db()
     app.run(host="0.0.0.0", port=5000, debug=False)

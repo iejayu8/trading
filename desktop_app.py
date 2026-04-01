@@ -188,9 +188,27 @@ def _run_embedded_backend() -> None:
         _backend_error = str(exc)
 
 
+def _is_backend_running() -> bool:
+    """Return True if a backend is already responding on port 5000."""
+    try:
+        r = requests.get(f"{BACKEND_URL}/api/status", timeout=2)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
 def start_backend() -> subprocess.Popen | None:
-    """Launch the Flask backend (thread in frozen mode, subprocess in source mode)."""
+    """Launch the Flask backend (thread in frozen mode, subprocess in source mode).
+
+    If a backend is already listening on port 5000 it is reused – no new
+    process is spawned.  This prevents duplicate instances when the desktop
+    app is opened more than once.
+    """
     global _backend_proc, _backend_thread
+
+    if _is_backend_running():
+        print("INFO: Backend already running on port 5000 – reusing existing instance.", flush=True)
+        return None
 
     credentials = _load_credentials()
     env = os.environ.copy()
