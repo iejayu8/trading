@@ -5,7 +5,7 @@
  *  • Common data (equity, mode, total PnL/WR, logs) is fetched globally.
  *  • Per-symbol data (price, signal, setup, chart) is
  *    fetched for the currently-selected tab symbol.
- *  • Open positions and trade history are shared across all symbols.
+ *  • Trade history is shared across all symbols.
  *  • Activity log is shared across all symbols (bottom of page).
  *  • Polls every 5 s via Promise.allSettled for resilience.
  */
@@ -250,39 +250,7 @@ async function loadConfig(sym) {
 }
 
 async function refreshCommonTradePanels() {
-  await Promise.allSettled([
-    refreshOpenTrades(),
-    refreshTradeHistory(),
-  ]);
-}
-
-async function refreshOpenTrades() {
-  let trades;
-  try { trades = await fetchJSON(`${API}/trades/open`); }
-  catch { return; }
-
-  const container = document.getElementById('open-trades-container');
-  container.innerHTML = '';
-  if (!trades.length) {
-    container.innerHTML = '<p class="empty-msg">No open positions</p>';
-    return;
-  }
-
-  trades.forEach(t => {
-    const dir = t.direction;
-    const pnlCls = dir === 'LONG' ? 'text-green' : 'text-red';
-    container.innerHTML += `
-      <div class="position-card">
-        <div class="direction ${pnlCls}">${dir} ${t.symbol}</div>
-        <div class="pos-row"><label>Entry</label><span>${formatPrice(t.entry_price)}</span></div>
-        <div class="pos-row"><label>Size</label><span>${t.size}</span></div>
-        <div class="pos-row"><label>Value</label><span>$${(Number(t.size) * Number(t.entry_price)).toFixed(2)}</span></div>
-        <div class="pos-row"><label>SL</label><span class="text-red">${formatPrice(t.sl_price)}</span></div>
-        <div class="pos-row"><label>TP</label><span class="text-green">${formatPrice(t.tp_price)}</span></div>
-        <div class="pos-row"><label>Leverage</label><span>${t.leverage}×</span></div>
-        <div class="pos-row"><label>Opened</label><span>${fmtTs(t.opened_at)}</span></div>
-      </div>`;
-  });
+  await refreshTradeHistory();
 }
 
 async function refreshTradeHistory() {
