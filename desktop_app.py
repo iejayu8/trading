@@ -248,11 +248,23 @@ def wait_for_backend(timeout: int = 30) -> bool:
 def stop_backend() -> None:
     """Terminate the backend subprocess if it is still running."""
     if _backend_proc and _backend_proc.poll() is None:
-        _backend_proc.terminate()
         try:
-            _backend_proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            _backend_proc.kill()
+            # Attempt graceful termination
+            _backend_proc.terminate()
+            
+            # Wait for graceful shutdown
+            try:
+                _backend_proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                # If still running after timeout, force kill
+                _backend_proc.kill()
+                _backend_proc.wait(timeout=2)
+        except Exception:
+            # Last resort: force kill if anything goes wrong
+            try:
+                _backend_proc.kill()
+            except Exception:
+                pass
 
     # Belt-and-suspenders: kill any lingering process still bound to port 5000.
     # On Windows, pywebview.start() occasionally returns without the subprocess
@@ -311,11 +323,17 @@ def main() -> None:
         background_color="#0d1117",
     )
 
+    # Register cleanup handler for when window is closed
+    def on_close():
+        stop_backend()
+
+    window.events.closed += on_close
+
     threading.Thread(target=_boot_and_load, args=(window,), daemon=True).start()
 
     webview.start(debug=False)
 
-    # Window has been closed – clean up the backend.
+    # Window has been closed – ensure backend is cleaned up.
     stop_backend()
 
 
