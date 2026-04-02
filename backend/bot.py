@@ -86,6 +86,10 @@ class TradingBot:
             self._stop_event.clear()
         db.update_bot_status(symbol=self.symbol, running=1)
         db.log_event(f"Bot started ({self.symbol})")
+        # Seed equity immediately so the dashboard shows the correct value
+        # before the first trading tick completes (which can take up to 15 min).
+        if self.paper_trading:
+            db.update_bot_status(symbol=self.symbol, equity=self._paper_equity())
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
 
