@@ -11,7 +11,11 @@
  *  • Polls every 5 s via Promise.allSettled for resilience.
  */
 
-const API = '/api';
+// When running as a Home Assistant add-on, the ingress proxy path is injected
+// by Flask as a <meta name="ingress-path"> tag. Use it so fetch() calls reach
+// the correct URLs through the HA ingress reverse-proxy.
+const _ingressPath = document.querySelector('meta[name="ingress-path"]')?.content ?? '';
+const API = _ingressPath ? `${_ingressPath}/api` : '/api';
 const POLL_INTERVAL = 5000;
 
 let priceChart = null;
