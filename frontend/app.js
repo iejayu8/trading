@@ -129,8 +129,6 @@ async function switchChartSymbol(sym) {
   document.querySelectorAll('#chart-tabs .panel-tab-btn').forEach(b => {
     b.classList.toggle('panel-tab-btn--active', b.dataset.symbol === sym);
   });
-  renderChecks('long-checks', {});
-  renderChecks('short-checks', {});
   await refreshSymbolChart(sym);
 }
 
@@ -541,15 +539,43 @@ function renderChecks(containerId, checks) {
   const el = document.getElementById(containerId);
   if (!el) return;
   const items = Object.entries(checks);
+
   if (!items.length) {
-    el.innerHTML = '<li><span>No data</span><span class="check-badge check-badge--no">N/A</span></li>';
+    // Only rewrite if it's not already showing the "No data" placeholder
+    const existing = el.querySelector('li');
+    if (!existing || existing.dataset.checkKey !== '__nodata__') {
+      el.innerHTML = '<li data-check-key="__nodata__"><span>No data</span><span class="check-badge check-badge--no">N/A</span></li>';
+    }
     return;
   }
-  el.innerHTML = items.map(([name, ok]) => {
-    const cls  = ok ? 'check-badge--ok' : 'check-badge--no';
-    const text = ok ? 'OK' : 'WAIT';
-    return `<li><span>${escHtml(name)}</span><span class="check-badge ${cls}">${text}</span></li>`;
-  }).join('');
+
+  const existingItems = el.querySelectorAll('li[data-check-key]');
+  const existingKeys  = Array.from(existingItems).map(li => li.dataset.checkKey);
+  const newKeys       = items.map(([name]) => name);
+
+  // If the set of condition keys changed, do a full rebuild (rare – only on symbol switch)
+  if (existingKeys.join('|') !== newKeys.join('|')) {
+    el.innerHTML = items.map(([name, ok]) => {
+      const cls  = ok ? 'check-badge--ok' : 'check-badge--no';
+      const text = ok ? 'OK' : 'WAIT';
+      return `<li data-check-key="${escHtml(name)}"><span>${escHtml(name)}</span><span class="check-badge ${cls}">${text}</span></li>`;
+    }).join('');
+    return;
+  }
+
+  // Keys match — patch only badges that changed
+  existingItems.forEach((li, i) => {
+    const [, ok] = items[i];
+    const badge = li.querySelector('.check-badge');
+    if (!badge) return;
+    const wantCls  = ok ? 'check-badge--ok' : 'check-badge--no';
+    const wantText = ok ? 'OK' : 'WAIT';
+    if (badge.textContent !== wantText) badge.textContent = wantText;
+    if (!badge.classList.contains(wantCls)) {
+      badge.classList.remove('check-badge--ok', 'check-badge--no');
+      badge.classList.add(wantCls);
+    }
+  });
 }
 
 function statusBadge(status) {
