@@ -139,7 +139,10 @@ def api_status():
 @app.get("/api/trades")
 def api_trades():
     symbol = request.args.get("symbol")
-    limit = int(request.args.get("limit", 100))
+    try:
+        limit = int(request.args.get("limit", 100))
+    except (ValueError, TypeError):
+        return jsonify({"ok": False, "message": "Invalid limit parameter"}), 400
     return jsonify(db.get_trade_history(symbol=symbol, limit=limit))
 
 
@@ -157,7 +160,10 @@ def api_stats():
 
 @app.get("/api/logs")
 def api_logs():
-    limit = int(request.args.get("limit", 100))
+    try:
+        limit = int(request.args.get("limit", 100))
+    except (ValueError, TypeError):
+        return jsonify({"ok": False, "message": "Invalid limit parameter"}), 400
     return jsonify(db.get_logs(limit=limit))
 
 
