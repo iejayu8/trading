@@ -304,7 +304,7 @@ main {
   background: #374151;
 }
 
-/* ── Symbol Tabs ─────────────────────────────────────────────────────────── */
+/* ── Symbol Tabs (legacy – kept for reference, not rendered) ─────────────── */
 .symbol-tabs {
   display: flex;
   gap: 4px;
@@ -352,6 +352,51 @@ main {
   color: var(--blue);
 }
 
+/* ── Per-symbol tab panel ─────────────────────────────────────────────────── */
+#symbol-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* ── All-symbols live status ─────────────────────────────────────────────── */
+#all-symbols-status {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.symbol-status-row {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.symbol-status-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.symbol-status-row:first-child {
+  padding-top: 0;
+}
+
+.symbol-row-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+
+.symbol-status-row .cards--symbol {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  margin-bottom: 0;
+}
+
 /* ── Common cards strip ─────────────────────────────────────────────────── */
 .cards--common {
   background: var(--surface-2);
@@ -368,3 +413,87 @@ main {
   padding: 12px 16px;
   margin-bottom: 12px;
 }
+
+/* ── Panel-internal tabs ──────────────────────────────────────────────────── */
+.panel__head--with-tabs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.panel__head--with-tabs .panel__title {
+  margin-bottom: 0;
+}
+
+.panel__head-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.panel-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.panel-tab-btn {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font);
+  padding: 4px 14px;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.panel-tab-btn:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.panel-tab-btn--active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(240, 185, 11, 0.07);
+}
+
+/* ── Collapse button ──────────────────────────────────────────────────────── */
+.btn--collapse {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 10px;
+  transition: color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.btn--collapse:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+/* ── Collapsible panel body ───────────────────────────────────────────────── */
+.panel-body.collapsed {
+  display: none;
+}
+
+.collapsible-panel .panel__head--with-tabs {
+  margin-bottom: 0;
+}
+
+.collapsible-panel .panel-body {
+  margin-top: 16px;
+}
+

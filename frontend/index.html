@@ -47,69 +47,61 @@
       </div>
     </section>
 
-    <!-- ── Symbol Tabs ───────────────────────────────────────────────────── -->
-    <div class="symbol-tabs" id="symbol-tabs">
-      <!-- Tabs injected by JS from /api/symbols -->
-    </div>
+    <!-- ── Live Symbol Status (all symbols) ────────────────────────────── -->
+    <section class="panel" id="all-symbols-status-panel">
+      <h2 class="panel__title">Live Symbol Status</h2>
+      <div id="all-symbols-status">
+        <!-- Per-symbol status rows injected by JS -->
+      </div>
+    </section>
 
-    <!-- ── Per-Symbol Panel ──────────────────────────────────────────────── -->
+    <!-- ── Per-Symbol Panel (Strategy Parameters + Market Context only) ── -->
     <div id="symbol-panel">
 
-      <!-- Symbol status strip -->
-      <section class="cards cards--symbol" id="symbol-kpi-cards">
-        <div class="card">
-          <div class="card__label">Last Price</div>
-          <div class="card__value" id="kpi-price">–</div>
+      <!-- Strategy Parameters -->
+      <section class="panel collapsible-panel">
+        <div class="panel__head panel__head--with-tabs">
+          <div class="panel__head-left">
+            <h2 class="panel__title">Strategy Parameters</h2>
+            <div class="panel-tabs" id="param-tabs"></div>
+          </div>
+          <button class="btn--collapse" id="btn-collapse-params"
+                  onclick="togglePanel('param-body', 'btn-collapse-params')"
+                  title="Collapse">▲</button>
         </div>
-        <div class="card">
-          <div class="card__label">Last Signal</div>
-          <div class="card__value" id="kpi-signal">–</div>
-        </div>
-        <div class="card">
-          <div class="card__label">Entry Setup</div>
-          <div class="card__value" id="kpi-setup">WAIT</div>
-        </div>
-        <div class="card">
-          <div class="card__label">Waiting For</div>
-          <div class="card__value card__value--small" id="kpi-waiting">–</div>
-        </div>
-        <div class="card">
-          <div class="card__label">Symbol PnL</div>
-          <div class="card__value" id="kpi-sym-pnl">–</div>
-        </div>
-        <div class="card">
-          <div class="card__label">Symbol WR</div>
-          <div class="card__value" id="kpi-sym-wr">–</div>
-        </div>
-      </section>
-
-      <!-- Two-column layout -->
-      <div class="grid-2">
-        <!-- Strategy Parameters -->
-        <section class="panel">
-          <h2 class="panel__title">Strategy Parameters</h2>
+        <div class="panel-body" id="param-body">
           <table class="param-table" id="param-table">
             <thead><tr><th>Parameter</th><th>Value</th></tr></thead>
             <tbody></tbody>
           </table>
-        </section>
-      </div>
+        </div>
+      </section>
 
       <!-- Market Context -->
-      <section class="panel">
-        <h2 class="panel__title">Market Context</h2>
-        <div class="market-grid">
-          <div class="chart-wrap">
-            <canvas id="price-chart"></canvas>
+      <section class="panel collapsible-panel">
+        <div class="panel__head panel__head--with-tabs">
+          <div class="panel__head-left">
+            <h2 class="panel__title">Market Context</h2>
+            <div class="panel-tabs" id="chart-tabs"></div>
           </div>
-          <div>
-            <div class="checklist-block">
-              <h3 class="sub-title">Long Conditions</h3>
-              <ul id="long-checks" class="checklist"></ul>
+          <button class="btn--collapse" id="btn-collapse-chart"
+                  onclick="togglePanel('chart-body', 'btn-collapse-chart')"
+                  title="Collapse">▲</button>
+        </div>
+        <div class="panel-body" id="chart-body">
+          <div class="market-grid">
+            <div class="chart-wrap">
+              <canvas id="price-chart"></canvas>
             </div>
-            <div class="checklist-block">
-              <h3 class="sub-title">Short Conditions</h3>
-              <ul id="short-checks" class="checklist"></ul>
+            <div>
+              <div class="checklist-block">
+                <h3 class="sub-title">Long Conditions</h3>
+                <ul id="long-checks" class="checklist"></ul>
+              </div>
+              <div class="checklist-block">
+                <h3 class="sub-title">Short Conditions</h3>
+                <ul id="short-checks" class="checklist"></ul>
+              </div>
             </div>
           </div>
         </div>

@@ -3,10 +3,11 @@
  *
  * Architecture:
  *  • Common data (equity, mode, total PnL/WR, logs) is fetched globally.
- *  • Per-symbol data (price, signal, setup, chart) is
- *    fetched for the currently-selected tab symbol.
- *  • Trade history is shared across all symbols.
- *  • Activity log is shared across all symbols (bottom of page).
+ *  • Live status cards (price, signal, setup, waiting, PnL, WR) are shown
+ *    for ALL symbols simultaneously and refreshed every poll cycle.
+ *  • Strategy parameters and market context (chart + conditions) are shown
+ *    per the currently-selected tab symbol only.
+ *  • Trade history and activity log are shared across all symbols.
  *  • Polls every 5 s via Promise.allSettled for resilience.
  */
 
@@ -14,8 +15,9 @@ const API = '/api';
 const POLL_INTERVAL = 5000;
 
 let priceChart = null;
-let _activeSymbol = null;   // currently selected tab
-let _symbols = [];           // list from /api/symbols
+let _activeParamSymbol = null;  // selected symbol in Strategy Parameters
+let _activeChartSymbol = null;  // selected symbol in Market Context
+let _symbols = [];               // list from /api/symbols
 
 // ── Boot ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -32,56 +34,116 @@ async function initSymbols() {
   } catch {
     _symbols = ['BTC-USDT'];
   }
-  _activeSymbol = _symbols[0];
-  renderTabs();
-  await loadConfig(_activeSymbol);
+  _activeParamSymbol = _symbols[0];
+  _activeChartSymbol = _symbols[0];
+  renderParamTabs();
+  renderChartTabs();
+  renderAllSymbolsStatusGrid();
+  await loadConfig(_activeParamSymbol);
 }
 
-function renderTabs() {
-  const container = document.getElementById('symbol-tabs');
+/** Convert a symbol name to a safe DOM-id suffix (e.g. "BTC-USDT" → "btc_usdt"). */
+function symId(sym) {
+  return sym.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+}
+
+/** Build the all-symbols status grid from the loaded _symbols list. */
+function renderAllSymbolsStatusGrid() {
+  const container = document.getElementById('all-symbols-status');
+  container.innerHTML = '';
+  _symbols.forEach(sym => {
+    const sid = symId(sym);
+    const row = document.createElement('div');
+    row.className = 'symbol-status-row';
+    row.id = `sym-row-${sid}`;
+    row.innerHTML = `
+      <div class="symbol-row-label">${sym}</div>
+      <div class="cards cards--symbol">
+        <div class="card">
+          <div class="card__label">Last Price</div>
+          <div class="card__value" id="kpi-price-${sid}">–</div>
+        </div>
+        <div class="card">
+          <div class="card__label">Last Signal</div>
+          <div class="card__value" id="kpi-signal-${sid}">–</div>
+        </div>
+        <div class="card">
+          <div class="card__label">Entry Setup</div>
+          <div class="card__value text-gold" id="kpi-setup-${sid}">WAIT</div>
+        </div>
+        <div class="card">
+          <div class="card__label">Waiting For</div>
+          <div class="card__value card__value--small" id="kpi-waiting-${sid}">–</div>
+        </div>
+        <div class="card">
+          <div class="card__label">Symbol PnL</div>
+          <div class="card__value" id="kpi-sym-pnl-${sid}">–</div>
+        </div>
+        <div class="card">
+          <div class="card__label">Symbol WR</div>
+          <div class="card__value" id="kpi-sym-wr-${sid}">–</div>
+        </div>
+      </div>`;
+    container.appendChild(row);
+  });
+}
+
+function renderParamTabs() {
+  const container = document.getElementById('param-tabs');
   container.innerHTML = '';
   _symbols.forEach(sym => {
     const btn = document.createElement('button');
-    btn.className = 'tab-btn' + (sym === _activeSymbol ? ' tab-btn--active' : '');
+    btn.className = 'panel-tab-btn' + (sym === _activeParamSymbol ? ' panel-tab-btn--active' : '');
     btn.textContent = sym;
     btn.dataset.symbol = sym;
-    btn.onclick = () => switchSymbol(sym);
+    btn.onclick = () => switchParamSymbol(sym);
     container.appendChild(btn);
   });
 }
 
-async function switchSymbol(sym) {
-  if (sym === _activeSymbol) return;
-  _activeSymbol = sym;
-
-  // Update tab appearance
-  document.querySelectorAll('.tab-btn').forEach(b => {
-    b.classList.toggle('tab-btn--active', b.dataset.symbol === sym);
+function renderChartTabs() {
+  const container = document.getElementById('chart-tabs');
+  container.innerHTML = '';
+  _symbols.forEach(sym => {
+    const btn = document.createElement('button');
+    btn.className = 'panel-tab-btn' + (sym === _activeChartSymbol ? ' panel-tab-btn--active' : '');
+    btn.textContent = sym;
+    btn.dataset.symbol = sym;
+    btn.onclick = () => switchChartSymbol(sym);
+    container.appendChild(btn);
   });
-
-  // Destroy existing chart so it re-renders for new symbol
-  if (priceChart) {
-    priceChart.destroy();
-    priceChart = null;
-  }
-
-  resetSymbolSpecificWidgets();
-  await loadConfig(sym);
-  await refreshSymbolPanel();
 }
 
-function resetSymbolSpecificWidgets() {
-  document.getElementById('kpi-price').textContent = '–';
-  document.getElementById('kpi-signal').textContent = '–';
+async function switchParamSymbol(sym) {
+  if (sym === _activeParamSymbol) return;
+  _activeParamSymbol = sym;
+  document.querySelectorAll('#param-tabs .panel-tab-btn').forEach(b => {
+    b.classList.toggle('panel-tab-btn--active', b.dataset.symbol === sym);
+  });
+  await loadConfig(sym);
+}
 
-  const setupEl = document.getElementById('kpi-setup');
-  setupEl.textContent = 'WAIT';
-  setupEl.className = 'card__value text-gold';
-
-  document.getElementById('kpi-waiting').textContent = '–';
-
+async function switchChartSymbol(sym) {
+  if (sym === _activeChartSymbol) return;
+  _activeChartSymbol = sym;
+  document.querySelectorAll('#chart-tabs .panel-tab-btn').forEach(b => {
+    b.classList.toggle('panel-tab-btn--active', b.dataset.symbol === sym);
+  });
   renderChecks('long-checks', {});
   renderChecks('short-checks', {});
+  await refreshSymbolChart(sym);
+}
+
+function togglePanel(bodyId, btnId) {
+  const body = document.getElementById(bodyId);
+  const btn  = document.getElementById(btnId);
+  const collapsed = body.classList.toggle('collapsed');
+  btn.textContent = collapsed ? '▼' : '▲';
+  btn.title = collapsed ? 'Expand' : 'Collapse';
+  // Resize chart canvas after expanding so Chart.js recalculates dimensions
+  if (!collapsed && priceChart) {
+    setTimeout(() => priceChart.resize(), 50);
+  }
 }
 
 // ── Fetch helpers ──────────────────────────────────────────────────────────
@@ -97,7 +159,8 @@ async function fetchJSON(url) {
 async function refreshAll() {
   await Promise.allSettled([
     refreshGlobal(),
-    refreshSymbolPanel(),
+    refreshAllSymbolCards(),
+    refreshSymbolChart(_activeChartSymbol),
     refreshCommonTradePanels(),
     refreshLogs(),
   ]);
@@ -107,13 +170,12 @@ async function refreshAll() {
 
 async function refreshGlobal() {
   await Promise.allSettled([
-    refreshAllStatus(),
+    refreshBotStatus(),
     refreshStats(),
   ]);
 }
 
-async function refreshAllStatus() {
-  // Fetch all-symbol status dict
+async function refreshBotStatus() {
   let allStatus;
   try {
     allStatus = await fetchJSON(`${API}/status`);
@@ -127,14 +189,13 @@ async function refreshAllStatus() {
   document.getElementById('btn-start').disabled = anyRunning;
   document.getElementById('btn-stop').disabled  = !anyRunning;
 
-  // Equity: sum across all running bots (or show active symbol's)
-  const activeStatus = allStatus[_activeSymbol] || {};
+  // Mode + equity from active symbol's status
+  const activeStatus = allStatus[_activeParamSymbol] || {};
   const modeEl = document.getElementById('kpi-mode');
   const mode = String(activeStatus.trading_mode || 'realtrading').toLowerCase();
   modeEl.textContent = mode.toUpperCase();
   modeEl.className = 'card__value ' + modeClass(mode);
 
-  // Equity: use first available
   let equity = null;
   for (const s of Object.values(allStatus)) {
     if (s.equity != null) { equity = s.equity; break; }
@@ -142,36 +203,23 @@ async function refreshAllStatus() {
   document.getElementById('kpi-equity').textContent =
     equity != null ? `$${Number(equity).toFixed(2)}` : '–';
 
-  // Also update per-symbol status strip for active tab
-  updateSymbolStatusStrip(activeStatus);
-}
-
-function updateSymbolStatusStrip(s) {
-  if (!s) return;
-
-  // Only update price from bot status when the bot has a recorded price.
-  // When the bot hasn't run yet (last_price === null), the live price from
-  // refreshMarketContext will fill this in instead.
-  if (s.last_price) {
-    document.getElementById('kpi-price').textContent = formatPrice(s.last_price);
+  // Update price and signal status cards for every symbol from the bulk status
+  for (const [sym, s] of Object.entries(allStatus)) {
+    const sid = symId(sym);
+    if (s.last_price) {
+      const priceEl = document.getElementById(`kpi-price-${sid}`);
+      if (priceEl) priceEl.textContent = formatPrice(s.last_price);
+    }
+    const sigEl = document.getElementById(`kpi-signal-${sid}`);
+    if (sigEl) {
+      const sig = (s.last_signal && s.last_signal !== 'NONE') ? s.last_signal : '–';
+      sigEl.textContent = sig;
+      sigEl.className = 'card__value ' + signalClass(s.last_signal);
+    }
   }
-
-  // kpi-signal reflects the last signal the bot actually executed.
-  // 'NONE' is the DB default (bot never fired); display '–' for both cases.
-  const sigEl = document.getElementById('kpi-signal');
-  const sig = (s.last_signal && s.last_signal !== 'NONE') ? s.last_signal : '–';
-  sigEl.textContent = sig;
-  sigEl.className = 'card__value ' + signalClass(s.last_signal);
-
-  // kpi-setup and kpi-waiting are owned by refreshMarketContext which
-  // computes them live from fresh candles.  Updating them here from bot_status
-  // (which is only written during bot ticks) causes a race condition: stale
-  // defaults ("WAIT" / "Collecting candles") can overwrite the live values
-  // when the two parallel fetches settle in the wrong order.
 }
 
 async function refreshStats() {
-  // Aggregate stats (all symbols)
   let st;
   try { st = await fetchJSON(`${API}/stats`); } catch { return; }
 
@@ -184,46 +232,62 @@ async function refreshStats() {
   document.getElementById('kpi-total-trades').textContent = st.total || 0;
 }
 
-// ── Per-symbol section ────────────────────────────────────────────────────
+// ── All-symbols status cards ──────────────────────────────────────────────
 
-async function refreshSymbolPanel() {
-  const sym = _activeSymbol;
+/** Refresh PnL/WR and live price/setup/waiting for every symbol simultaneously. */
+async function refreshAllSymbolCards() {
+  await Promise.allSettled(_symbols.map(sym => refreshOneSymbolCards(sym)));
+}
+
+async function refreshOneSymbolCards(sym) {
+  const sid = symId(sym);
   await Promise.allSettled([
-    refreshSymbolStatus(sym),
-    refreshSymbolStats(sym),
-    refreshMarketContext(sym),
+    // Stats → PnL, Win Rate
+    (async () => {
+      try {
+        const st = await fetchJSON(`${API}/stats?symbol=${encodeURIComponent(sym)}`);
+        const pnlEl = document.getElementById(`kpi-sym-pnl-${sid}`);
+        const wrEl  = document.getElementById(`kpi-sym-wr-${sid}`);
+        if (!pnlEl || !wrEl) return;
+        const pnl = Number(st.total_pnl || 0);
+        pnlEl.textContent = `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`;
+        pnlEl.className = 'card__value ' + (pnl >= 0 ? 'text-green' : 'text-red');
+        wrEl.textContent = st.total ? `${st.win_rate}%` : '–';
+      } catch {}
+    })(),
+    // Market context (lightweight) → live price, setup, waiting
+    (async () => {
+      try {
+        const ctx = await fetchJSON(`${API}/market/context?symbol=${encodeURIComponent(sym)}&limit=50`);
+        if (!ctx.ok) return;
+        if (ctx.values && ctx.values.close != null) {
+          const priceEl = document.getElementById(`kpi-price-${sid}`);
+          if (priceEl) priceEl.textContent = formatPrice(ctx.values.close);
+        }
+        if (ctx.diagnostics) {
+          const hint = ctx.diagnostics.signal_hint || 'WAIT';
+          const setupEl = document.getElementById(`kpi-setup-${sid}`);
+          if (setupEl) {
+            setupEl.textContent = hint.replaceAll('_', ' ');
+            setupEl.className = 'card__value ' + setupClass(hint);
+          }
+          const waitEl = document.getElementById(`kpi-waiting-${sid}`);
+          if (waitEl) waitEl.textContent = ctx.diagnostics.waiting_for || 'Collecting candles';
+        }
+      } catch {}
+    })(),
   ]);
 }
 
-async function refreshSymbolStatus(sym) {
-  let s;
-  try { s = await fetchJSON(`${API}/status?symbol=${encodeURIComponent(sym)}`); }
-  catch { return; }
-  if (sym !== _activeSymbol) return;
-  updateSymbolStatusStrip(s);
-}
-
-async function refreshSymbolStats(sym) {
-  let st;
-  try { st = await fetchJSON(`${API}/stats?symbol=${encodeURIComponent(sym)}`); }
-  catch { return; }
-  if (sym !== _activeSymbol) return;
-
-  const symPnlEl = document.getElementById('kpi-sym-pnl');
-  const pnl = Number(st.total_pnl || 0);
-  symPnlEl.textContent = `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`;
-  symPnlEl.className = 'card__value ' + (pnl >= 0 ? 'text-green' : 'text-red');
-
-  document.getElementById('kpi-sym-wr').textContent = st.total ? `${st.win_rate}%` : '–';
-}
+// ── Per-symbol tab panel (chart + conditions) ─────────────────────────────
 
 async function loadConfig(sym) {
   let cfg;
   try { cfg = await fetchJSON(`${API}/config?symbol=${encodeURIComponent(sym)}`); }
   catch { return; }
-  if (sym !== _activeSymbol) return;
+  if (sym !== _activeParamSymbol) return;
 
-  const tbody = document.querySelector('#param-table tbody');
+  const tbody= document.querySelector('#param-table tbody');
   tbody.innerHTML = '';
   const mode = String(cfg.trading_mode || 'realtrading').toLowerCase();
   const rows = [
@@ -249,73 +313,11 @@ async function loadConfig(sym) {
   });
 }
 
-async function refreshCommonTradePanels() {
-  await refreshTradeHistory();
-}
-
-async function refreshTradeHistory() {
-  let trades;
-  try { trades = await fetchJSON(`${API}/trades?limit=50`); }
-  catch { return; }
-
-  const tbody = document.querySelector('#trade-table tbody');
-  tbody.innerHTML = '';
-  if (!trades.length) {
-    tbody.innerHTML = '<tr><td colspan="14" class="empty-msg" style="padding:12px">No trades yet</td></tr>';
-    return;
-  }
-
-  trades.forEach(t => {
-    const pnl = t.pnl != null ? Number(t.pnl) : null;
-    const pnlStr = pnl != null
-      ? `<span class="${pnl >= 0 ? 'text-green' : 'text-red'}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}</span>`
-      : '–';
-    const dirCls = t.direction === 'LONG' ? 'text-green' : 'text-red';
-    const value = Number(t.size) * Number(t.entry_price);
-
-    const entry = Number(t.entry_price);
-    const size  = Number(t.size);
-    const isLong = t.direction === 'LONG';
-
-    let slLossStr = '–';
-    if (t.sl_price != null) {
-      const sl = Number(t.sl_price);
-      const slLoss = isLong ? (sl - entry) * size : (entry - sl) * size;
-      slLossStr = `<span class="text-red">${slLoss.toFixed(2)}</span>`;
-    }
-
-    let tpProfitStr = '–';
-    if (t.tp_price != null) {
-      const tp = Number(t.tp_price);
-      const tpProfit = isLong ? (tp - entry) * size : (entry - tp) * size;
-      tpProfitStr = `<span class="text-green">+${tpProfit.toFixed(2)}</span>`;
-    }
-
-    tbody.innerHTML += `
-      <tr>
-        <td>${t.id}</td>
-        <td><strong>${t.symbol}</strong></td>
-        <td class="${dirCls}"><strong>${t.direction}</strong></td>
-        <td>${formatPrice(t.entry_price)}</td>
-        <td>${t.exit_price ? formatPrice(t.exit_price) : '–'}</td>
-        <td>${t.size}</td>
-        <td>$${value.toFixed(2)}</td>
-        <td class="text-red">${formatPrice(t.sl_price)}</td>
-        <td class="text-green">${formatPrice(t.tp_price)}</td>
-        <td>${slLossStr}</td>
-        <td>${tpProfitStr}</td>
-        <td>${pnlStr}</td>
-        <td>${statusBadge(t.status)}</td>
-        <td>${fmtTs(t.opened_at)}</td>
-      </tr>`;
-  });
-}
-
-async function refreshMarketContext(sym) {
+async function refreshSymbolChart(sym) {
   let ctx;
   try { ctx = await fetchJSON(`${API}/market/context?symbol=${encodeURIComponent(sym)}&limit=200`); }
   catch { return; }
-  if (sym !== _activeSymbol) return;
+  if (sym !== _activeChartSymbol) return;
   if (!ctx.ok || !ctx.candles || !ctx.candles.length) return;
 
   const labels = ctx.candles.map(c => fmtTs(c.ts));
@@ -381,21 +383,70 @@ async function refreshMarketContext(sym) {
 
   renderChecks('long-checks',  ctx.long_checks  || {});
   renderChecks('short-checks', ctx.short_checks || {});
+}
 
-  // Update live-market KPIs from fresh chart data.  This ensures price,
-  // setup, and waiting-for are always current even when the bot hasn't
-  // run a tick yet (e.g. ETH bot not started).
-  if (ctx.values && ctx.values.close != null) {
-    document.getElementById('kpi-price').textContent = formatPrice(ctx.values.close);
+// ── Trade history & logs (common) ─────────────────────────────────────────
+
+async function refreshCommonTradePanels() {
+  await refreshTradeHistory();
+}
+
+async function refreshTradeHistory() {
+  let trades;
+  try { trades = await fetchJSON(`${API}/trades?limit=50`); }
+  catch { return; }
+
+  const tbody = document.querySelector('#trade-table tbody');
+  tbody.innerHTML = '';
+  if (!trades.length) {
+    tbody.innerHTML = '<tr><td colspan="14" class="empty-msg" style="padding:12px">No trades yet</td></tr>';
+    return;
   }
-  if (ctx.diagnostics) {
-    const hint = ctx.diagnostics.signal_hint || 'WAIT';
-    const setupEl = document.getElementById('kpi-setup');
-    setupEl.textContent = hint.replaceAll('_', ' ');
-    setupEl.className = 'card__value ' + setupClass(hint);
-    document.getElementById('kpi-waiting').textContent =
-      ctx.diagnostics.waiting_for || 'Collecting candles';
-  }
+
+  trades.forEach(t => {
+    const pnl = t.pnl != null ? Number(t.pnl) : null;
+    const pnlStr = pnl != null
+      ? `<span class="${pnl >= 0 ? 'text-green' : 'text-red'}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}</span>`
+      : '–';
+    const dirCls = t.direction === 'LONG' ? 'text-green' : 'text-red';
+    const value = Number(t.size) * Number(t.entry_price);
+
+    const entry = Number(t.entry_price);
+    const size  = Number(t.size);
+    const isLong = t.direction === 'LONG';
+
+    let slLossStr = '–';
+    if (t.sl_price != null) {
+      const sl = Number(t.sl_price);
+      const slLoss = isLong ? (sl - entry) * size : (entry - sl) * size;
+      slLossStr = `<span class="text-red">${slLoss.toFixed(2)}</span>`;
+    }
+
+    let tpProfitStr = '–';
+    if (t.tp_price != null) {
+      const tp = Number(t.tp_price);
+      const tpProfit = isLong ? (tp - entry) * size : (entry - tp) * size;
+      tpProfitStr = `<span class="text-green">+${tpProfit.toFixed(2)}</span>`;
+    }
+
+    tbody.innerHTML += `
+      <tr>
+        <td>${t.id}</td>
+        <td><strong>${t.symbol}</strong></td>
+        <td class="${dirCls}"><strong>${t.direction}</strong></td>
+        <td>${formatPrice(t.entry_price)}</td>
+        <td>${t.exit_price ? formatPrice(t.exit_price) : '–'}</td>
+        <td>${t.size}</td>
+        <td>$${value.toFixed(2)}</td>
+        <td class="text-red">${formatPrice(t.sl_price)}</td>
+        <td class="text-green">${formatPrice(t.tp_price)}</td>
+        <td>${slLossStr}</td>
+        <td>${tpProfitStr}</td>
+        <td>${pnlStr}</td>
+        <td>${statusBadge(t.status)}</td>
+        <td>${fmtTs(t.opened_at)}</td>
+      </tr>`;
+  });
 }
 
 // ── Activity log (common) ─────────────────────────────────────────────────
@@ -526,3 +577,4 @@ function escHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 }
+
