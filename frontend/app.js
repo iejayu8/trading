@@ -402,19 +402,32 @@ async function refreshMarketContext(sym) {
 
 async function refreshLogs() {
   let logs;
-  try { logs = await fetchJSON(`${API}/logs?limit=60`); } catch { return; }
+  try {
+    logs = await fetchJSON(`${API}/logs?limit=60`);
+  } catch (e) {
+    console.error('Activity log fetch failed:', e);
+    const container = document.getElementById('log-container');
+    if (container && !container.innerHTML.trim()) {
+      container.innerHTML = '<div class="log-empty">Unable to load activity log — check backend connection.</div>';
+    }
+    return;
+  }
 
   const container = document.getElementById('log-container');
-  container.innerHTML = '';
-  const orderedLogs = [...logs].reverse();
-  orderedLogs.forEach(l => {
-    container.innerHTML += `
-      <div class="log-entry">
-        <span class="log-ts">${fmtTs(l.ts)}</span>
-        <span class="log-level-${l.level}">[${l.level}]</span>
-        <span>${escHtml(l.message)}</span>
-      </div>`;
-  });
+
+  if (!logs || logs.length === 0) {
+    container.innerHTML = '<div class="log-empty">No activity yet — start the bot to begin logging.</div>';
+    return;
+  }
+
+  const html = [...logs].reverse().map(l => `
+    <div class="log-entry">
+      <span class="log-ts">${fmtTs(l.ts)}</span>
+      <span class="log-level-${l.level}">[${l.level}]</span>
+      <span>${escHtml(l.message)}</span>
+    </div>`).join('');
+
+  container.innerHTML = html;
   container.scrollTop = container.scrollHeight;
 }
 

@@ -63,6 +63,10 @@ _FRONTEND_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "
 app = Flask(__name__)
 CORS(app)
 
+# Ensure DB tables exist regardless of how Flask is started (subprocess, embedded,
+# or `flask run`).  init_db() is idempotent so calling it multiple times is safe.
+db.init_db()
+
 
 # ── Frontend ──────────────────────────────────────────────────────────────────
 
@@ -135,7 +139,10 @@ def api_status():
 @app.get("/api/trades")
 def api_trades():
     symbol = request.args.get("symbol")
-    limit = int(request.args.get("limit", 100))
+    try:
+        limit = int(request.args.get("limit", 100))
+    except (ValueError, TypeError):
+        return jsonify({"ok": False, "message": "Invalid limit parameter"}), 400
     return jsonify(db.get_trade_history(symbol=symbol, limit=limit))
 
 
@@ -153,7 +160,10 @@ def api_stats():
 
 @app.get("/api/logs")
 def api_logs():
-    limit = int(request.args.get("limit", 100))
+    try:
+        limit = int(request.args.get("limit", 100))
+    except (ValueError, TypeError):
+        return jsonify({"ok": False, "message": "Invalid limit parameter"}), 400
     return jsonify(db.get_logs(limit=limit))
 
 
@@ -354,4 +364,5 @@ if __name__ == "__main__":
         )
         sys.exit(1)
     db.init_db()
+    db.log_event("Server started")
     app.run(host="0.0.0.0", port=5000, debug=False)

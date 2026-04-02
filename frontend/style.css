@@ -225,6 +225,7 @@ main {
 .log-level-INFO    { color: var(--blue); }
 .log-level-WARNING { color: var(--accent); }
 .log-level-ERROR   { color: var(--red); }
+.log-empty { color: var(--text-muted); font-style: italic; padding: 8px 0; }
 
 .empty-msg { color: var(--text-muted); font-style: italic; }
 
