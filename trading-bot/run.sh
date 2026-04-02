@@ -30,6 +30,10 @@ keys = [
     'TRADING_LEVERAGE',
     'RISK_PER_TRADE',
     'TRADING_MARGIN_MODE',
+    'MAX_OPEN_POSITIONS',
+    'MAX_MARGIN_USAGE_PCT',
+    'MAX_PORTFOLIO_RISK_PCT',
+    'MAX_SYMBOL_EXPOSURE_PCT',
 ]
 
 with credentials_path.open('w', encoding='utf-8') as fh:
