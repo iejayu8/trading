@@ -75,6 +75,17 @@ _STATIC_EXTENSIONS = {".css", ".js", ".html", ".ico", ".png", ".svg", ".woff", "
 
 @app.get("/")
 def index():
+    # When running as a Home Assistant add-on, HA sets X-Ingress-Path.
+    # Inject it as a <meta> tag so the frontend JS can build correct API URLs.
+    ingress_path = request.headers.get("X-Ingress-Path", "").rstrip("/")
+    if ingress_path:
+        with open(os.path.join(_FRONTEND_DIR, "index.html"), encoding="utf-8") as fh:
+            html = fh.read()
+        html = html.replace(
+            "</head>",
+            f'  <meta name="ingress-path" content="{ingress_path}">\n</head>',
+        )
+        return html, 200, {"Content-Type": "text/html; charset=utf-8"}
     return send_from_directory(_FRONTEND_DIR, "index.html")
 
 
