@@ -63,6 +63,10 @@ _FRONTEND_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "
 app = Flask(__name__)
 CORS(app)
 
+# Ensure DB tables exist regardless of how Flask is started (subprocess, embedded,
+# or `flask run`).  init_db() is idempotent so calling it multiple times is safe.
+db.init_db()
+
 
 # ── Frontend ──────────────────────────────────────────────────────────────────
 

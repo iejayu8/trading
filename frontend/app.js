@@ -401,8 +401,17 @@ async function refreshMarketContext(sym) {
 // ── Activity log (common) ─────────────────────────────────────────────────
 
 async function refreshLogs() {
+  const container = document.getElementById('log-container');
   let logs;
-  try { logs = await fetchJSON(`${API}/logs?limit=60`); } catch { return; }
+  try {
+    logs = await fetchJSON(`${API}/logs?limit=60`);
+  } catch (e) {
+    console.error('Activity log fetch failed:', e);
+    if (container && !container.innerHTML.trim()) {
+      container.innerHTML = '<div class="log-empty">Unable to load activity log — check backend connection.</div>';
+    }
+    return;
+  }
 
   const container = document.getElementById('log-container');
 
