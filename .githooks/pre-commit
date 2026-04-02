@@ -1,0 +1,46 @@
+#!/bin/sh
+# pre-commit hook: keep trading-bot/backend and trading-bot/frontend in sync
+# with the source-of-truth backend/ and frontend/ folders.
+# Runs automatically on every `git commit`.
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+sync_dir() {
+    src="$REPO_ROOT/$1"
+    dst="$REPO_ROOT/trading-bot/$1"
+
+    if [ ! -d "$src" ]; then
+        return
+    fi
+
+    # Mirror src into dst, deleting files in dst that no longer exist in src.
+    # Exclude local SQLite database files.
+    rsync -a --delete \
+        --exclude='*.db' \
+        --exclude='*.db-shm' \
+        --exclude='*.db-wal' \
+        "$src/" "$dst/"
+
+    # Stage any changes to the trading-bot copy
+    git add "$dst"
+}
+
+# Check if rsync is available; fall back to xcopy on Windows (Git Bash has rsync usually)
+if command -v rsync >/dev/null 2>&1; then
+    sync_dir backend
+    sync_dir frontend
+else
+    # Fallback: plain copy via cp (available in Git Bash)
+    for dir in backend frontend; do
+        src="$REPO_ROOT/$dir"
+        dst="$REPO_ROOT/trading-bot/$dir"
+        [ -d "$src" ] || continue
+        rm -rf "$dst"
+        cp -r "$src" "$dst"
+        # Remove db files
+        find "$dst" -name "*.db" -o -name "*.db-shm" -o -name "*.db-wal" | xargs rm -f 2>/dev/null || true
+        git add "$dst"
+    done
+fi
+
+echo "[pre-commit] trading-bot/backend and trading-bot/frontend synced."
