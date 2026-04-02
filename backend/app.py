@@ -274,8 +274,14 @@ def api_market_context():
         return jsonify({"ok": False, "message": "Invalid limit parameter"}), 400
     limit = max(60, min(limit, 200))
 
+    # Always fetch at least MIN_BARS_REQUIRED candles so get_signal_diagnostics()
+    # can compute accurate status. The display-level limit only controls how many
+    # candles are included in the chart response, not how many are analysed.
+    _MIN_BARS = 200  # mirrors strategy.MIN_BARS_REQUIRED
+    fetch_limit = max(limit, _MIN_BARS)
+
     client = BloFinClient()
-    raw = client.get_candles(symbol, bar=config.TIMEFRAME, limit=limit)
+    raw = client.get_candles(symbol, bar=config.TIMEFRAME, limit=fetch_limit)
     if not raw:
         return jsonify({"ok": False, "message": "No market candles available"}), 502
 
