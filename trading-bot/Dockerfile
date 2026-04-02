@@ -7,13 +7,14 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /app
 
-# Build context is the repository root; use the main app sources as the single source of truth.
+# Build context is the trading-bot/ directory (set by Home Assistant supervisor).
+# backend/ and frontend/ are committed directly inside this folder.
 COPY backend/requirements.txt /app/backend/requirements.txt
 RUN pip3 install --no-cache-dir -r /app/backend/requirements.txt
 
 COPY backend /app/backend
 COPY frontend /app/frontend
-COPY trading-bot/run.sh /run.sh
+COPY run.sh /run.sh
 
 RUN chmod a+x /run.sh
 
