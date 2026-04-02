@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trading Bot Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="logo">
+        <span class="logo-icon">⚡</span>
+        <span class="logo-text">BloFin Trading Bot</span>
+      </div>
+      <div class="header-status">
+        <span id="bot-indicator" class="indicator indicator--stopped"></span>
+        <span id="bot-status-text">Stopped</span>
+        <button id="btn-start" class="btn btn--success" onclick="startBot()">Start All</button>
+        <button id="btn-stop"  class="btn btn--danger"  onclick="stopBot()" disabled>Stop All</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- ── Common KPI Cards ───────────────────────────────────────────────── -->
+    <section class="cards cards--common">
+      <div class="card">
+        <div class="card__label">Equity (USDT)</div>
+        <div class="card__value" id="kpi-equity">–</div>
+      </div>
+      <div class="card">
+        <div class="card__label">Mode</div>
+        <div class="card__value" id="kpi-mode">REALTRADING</div>
+      </div>
+      <div class="card">
+        <div class="card__label">Total PnL (All)</div>
+        <div class="card__value" id="kpi-pnl">–</div>
+      </div>
+      <div class="card">
+        <div class="card__label">Win Rate (All)</div>
+        <div class="card__value" id="kpi-winrate">–</div>
+      </div>
+      <div class="card">
+        <div class="card__label">Total Trades</div>
+        <div class="card__value" id="kpi-total-trades">–</div>
+      </div>
+    </section>
+
+    <!-- ── Live Symbol Status (all symbols) ────────────────────────────── -->
+    <section class="panel" id="all-symbols-status-panel">
+      <h2 class="panel__title">Live Symbol Status</h2>
+      <div id="all-symbols-status">
+        <!-- Per-symbol status rows injected by JS -->
+      </div>
+    </section>
+
+    <!-- ── Per-Symbol Panel (Strategy Parameters + Market Context only) ── -->
+    <div id="symbol-panel">
+
+      <!-- Strategy Parameters -->
+      <section class="panel collapsible-panel">
+        <div class="panel__head panel__head--with-tabs">
+          <div class="panel__head-left">
+            <h2 class="panel__title">Strategy Parameters</h2>
+            <div class="panel-tabs" id="param-tabs"></div>
+          </div>
+          <button class="btn--collapse" id="btn-collapse-params"
+                  onclick="togglePanel('param-body', 'btn-collapse-params')"
+                  title="Expand">▼</button>
+        </div>
+        <div class="panel-body collapsed" id="param-body">
+          <table class="param-table" id="param-table">
+            <thead><tr><th>Parameter</th><th>Value</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Market Context -->
+      <section class="panel collapsible-panel">
+        <div class="panel__head panel__head--with-tabs">
+          <div class="panel__head-left">
+            <h2 class="panel__title">Market Context</h2>
+            <div class="panel-tabs" id="chart-tabs"></div>
+          </div>
+          <button class="btn--collapse" id="btn-collapse-chart"
+                  onclick="togglePanel('chart-body', 'btn-collapse-chart')"
+                  title="Collapse">▲</button>
+        </div>
+        <div class="panel-body" id="chart-body">
+          <div class="market-grid">
+            <div class="chart-wrap">
+              <canvas id="price-chart"></canvas>
+            </div>
+            <div>
+              <div class="checklist-block">
+                <h3 class="sub-title">Long Conditions</h3>
+                <ul id="long-checks" class="checklist"></ul>
+              </div>
+              <div class="checklist-block">
+                <h3 class="sub-title">Short Conditions</h3>
+                <ul id="short-checks" class="checklist"></ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div><!-- /symbol-panel -->
+
+    <!-- ── Trade History (common) ────────────────────────────────────────── -->
+    <section class="panel">
+      <h2 class="panel__title">Trade History <span class="tag tag--info">All Symbols</span></h2>
+      <div class="table-scroll">
+        <table class="data-table" id="trade-table">
+          <thead>
+            <tr>
+              <th>#</th><th>Symbol</th><th>Direction</th><th>Entry</th><th>Exit</th>
+              <th>Size</th><th>Value (USDT)</th><th>SL</th><th>TP</th>
+              <th>SL Loss</th><th>TP Profit</th>
+              <th>PnL (USDT)</th><th>Status</th><th>Opened</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ── Activity Log (common) ─────────────────────────────────────────── -->
+    <section class="panel">
+      <div class="panel__head">
+        <h2 class="panel__title">Activity Log <span class="tag tag--info">All Symbols</span></h2>
+        <button id="btn-clear-logs" class="btn btn--secondary" onclick="clearLogs()">Clear Log</button>
+      </div>
+      <div id="log-container" class="log-container"></div>
+    </section>
+
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
