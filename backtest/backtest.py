@@ -33,6 +33,7 @@ from strategy import (
     calculate_sl_tp,
     compute_indicators,
     generate_signal,
+    reset_signal_state,
 )
 from fetch_data import load_or_fetch
 
@@ -68,6 +69,7 @@ class Backtest:
     def run(self, df: pd.DataFrame) -> dict:
         """Run the backtest on a complete OHLCV DataFrame."""
         df = compute_indicators(df)
+        reset_signal_state(self.symbol)  # ensure each run starts with a clean cooldown slate
         params = config.get_symbol_params(self.symbol)
 
         for i in range(config.TREND_EMA + 5, len(df)):
