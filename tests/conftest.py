@@ -17,8 +17,8 @@ sys.path.insert(0, str(project_root / "backend"))
 
 @pytest.fixture
 def backend_path():
-    """Return path to backend directory."""
-    return Path(__file__).parent / "backend"
+    """Return path to the backend source directory."""
+    return project_root / "backend"
 
 
 @pytest.fixture
