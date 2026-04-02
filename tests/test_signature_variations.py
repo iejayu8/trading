@@ -1,92 +1,166 @@
 """
-Test signature with different formats to find what works.
+Unit tests for BloFin exchange client HTTP methods.
+
+All tests are offline — network calls are mocked.
 """
 
+import json
 import sys
-import hashlib
-import hmac
-import time
 import base64
 from pathlib import Path
+from unittest.mock import MagicMock, patch, PropertyMock
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 
-try:
-    import config
-except ImportError:
-    from backend import config
+import config
+from exchange import BloFinClient
 
 
-def _mask(value: str, visible: int = 4) -> str:
-    if not value:
-        return "<empty>"
-    if len(value) <= visible * 2:
-        return "*" * len(value)
-    return f"{value[:visible]}...{value[-visible:]}"
+def _make_client(monkeypatch, secret: str = "test_secret") -> BloFinClient:
+    encoded = base64.b64encode(secret.encode()).decode()
+    monkeypatch.setattr(config, "BLOFIN_API_KEY", "test_key")
+    monkeypatch.setattr(config, "_SECRET_B64", encoded)
+    monkeypatch.setattr(config, "BLOFIN_API_PASSPHRASE", "test_pass")
+    return BloFinClient()
 
 
-def test_signature_variations():
-    """Test different signature combinations."""
-    print("\n" + "=" * 70)
-    print("TESTING SIGNATURE VARIATIONS")
-    print("=" * 70)
-    
-    # Get the raw value from env
-    raw_secret_b64 = config._SECRET_B64
-    decoded_secret = config.get_api_secret()
-    
-    print(f"\nRAW SECRET (from .env): {_mask(raw_secret_b64)}")
-    print(f"DECODED SECRET: {_mask(decoded_secret)}")
-    
-    ts = str(int(time.time() * 1000))
-    nonce = str(int(time.time() * 1000000))
-    method = "GET"
-    path = "/api/v1/account/balance"
-    body = ""
-    
-    print(f"\n{'='*70}")
-    print("VARIATION 1: Without nonce in signature (might be for sub-accounts)")
-    print("="*70)
-    message1 = ts + method.upper() + path + (body or "")
-    sig1 = hmac.new(decoded_secret.encode(), message1.encode(), hashlib.sha256).hexdigest()
-    print(f"Message: {repr(message1)}")
-    print(f"Signature: {sig1}")
-    
-    print(f"\n{'='*70}")
-    print("VARIATION 2: With nonce in signature (current implementation)")
-    print("="*70)
-    message2 = ts + method.upper() + path + (body or "") + nonce
-    sig2 = hmac.new(decoded_secret.encode(), message2.encode(), hashlib.sha256).hexdigest()
-    print(f"Message: {repr(message2)}")
-    print(f"Signature: {sig2}")
-    
-    print(f"\n{'='*70}")
-    print("VARIATION 3: Using raw base64 secret as-is (without decoding)")
-    print("="*70)
-    message3 = ts + method.upper() + path + (body or "")
-    sig3 = hmac.new(raw_secret_b64.encode(), message3.encode(), hashlib.sha256).hexdigest()
-    print(f"Message: {repr(message3)}")
-    print(f"Signature: {sig3}")
-    
-    print(f"\n{'='*70}")
-    print("VARIATION 4: Using raw base64 + nonce")
-    print("="*70)
-    message4 = ts + method.upper() + path + (body or "") + nonce
-    sig4 = hmac.new(raw_secret_b64.encode(), message4.encode(), hashlib.sha256).hexdigest()
-    print(f"Message: {repr(message4)}")
-    print(f"Signature: {sig4}")
-    
-    print(f"\n{'='*70}")
-    print("VARIATION 5: Nonce in milliseconds, not microseconds")
-    print("="*70)
-    nonce_ms = str(int(time.time() * 1000))
-    message5 = ts + method.upper() + path + (body or "") + nonce_ms
-    sig5 = hmac.new(decoded_secret.encode(), message5.encode(), hashlib.sha256).hexdigest()
-    print(f"Message: {repr(message5)}")
-    print(f"Signature: {sig5}")
-    
-    print(f"\n{'='*70}\n")
+def _mock_response(data: dict, status: int = 200) -> MagicMock:
+    resp = MagicMock()
+    resp.status_code = status
+    resp.json.return_value = data
+    resp.raise_for_status = MagicMock()
+    return resp
 
 
-if __name__ == "__main__":
-    test_signature_variations()
+class TestGetMethod:
+    def test_get_calls_session_get(self, monkeypatch):
+        client = _make_client(monkeypatch)
+        mock_resp = _mock_response({"code": "0", "data": []})
+        client._session.get = MagicMock(return_value=mock_resp)
+        result = client._get("/api/v1/market/candles", {"instId": "BTC-USDT"})
+        assert client._session.get.called
+
+    def test_get_appends_query_string_to_url(self, monkeypatch):
+        client = _make_client(monkeypatch)
+        mock_resp = _mock_response({"code": "0", "data": []})
+        client._session.get = MagicMock(return_value=mock_resp)
+        client._get("/api/v1/market/candles", {"instId": "BTC-USDT", "bar": "15m"})
+        url_called = client._session.get.call_args[0][0]
+        assert "instId=BTC-USDT" in url_called
+        assert "bar=15m" in url_called
+
+    def test_get_no_params_no_question_mark(self, monkeypatch):
+        client = _make_client(monkeypatch)
+        mock_resp = _mock_response({"code": "0", "data": {}})
+        client._session.get = MagicMock(return_value=mock_resp)
+        client._get("/api/v1/account/balance")
+        url_called = client._session.get.call_args[0][0]
+        assert url_called.endswith("/api/v1/account/balance")
+
+    def test_get_returns_json(self, monkeypatch):
+        client = _make_client(monkeypatch)
+        payload = {"code": "0", "data": [{"price": "50000"}]}
+        mock_resp = _mock_response(payload)
+        client._session.get = MagicMock(return_value=mock_resp)
+        result = client._get("/api/v1/market/tickers")
+        assert result == payload
+
+    def test_get_signed_path_includes_query_in_signature(self, monkeypatch):
+        """The signed path (used in signature) includes the query string."""
+        client = _make_client(monkeypatch)
+        signed_paths = []
+        original_headers = client._headers
+
+        def capture_headers(method, path, nonce, body=""):
+            signed_paths.append(path)
+            return original_headers(method, path, nonce, body)
+
+        client._headers = capture_headers
+        mock_resp = _mock_response({"code": "0", "data": []})
+        client._session.get = MagicMock(return_value=mock_resp)
+        client._get("/api/v1/market/candles", {"instId": "ETH-USDT"})
+        assert any("instId=ETH-USDT" in p for p in signed_paths)
+
+
+class TestPostMethod:
+    def test_post_calls_session_post(self, monkeypatch):
+        client = _make_client(monkeypatch)
+        mock_resp = _mock_response({"code": "0", "data": [{"orderId": "99"}]})
+        client._session.post = MagicMock(return_value=mock_resp)
+        result = client._post("/api/v1/trade/order", {"instId": "BTC-USDT", "side": "buy"})
+        assert client._session.post.called
+
+    def test_post_sends_json_body(self, monkeypatch):
+        client = _make_client(monkeypatch)
+        mock_resp = _mock_response({"code": "0"})
+        client._session.post = MagicMock(return_value=mock_resp)
+        payload = {"instId": "BTC-USDT", "side": "buy", "sz": "0.001"}
+        client._post("/api/v1/trade/order", payload)
+        body_sent = client._session.post.call_args[1]["data"]
+        assert json.loads(body_sent) == payload
+
+    def test_post_returns_json(self, monkeypatch):
+        client = _make_client(monkeypatch)
+        resp_data = {"code": "0", "data": [{"orderId": "42"}]}
+        mock_resp = _mock_response(resp_data)
+        client._session.post = MagicMock(return_value=mock_resp)
+        result = client._post("/api/v1/trade/order", {})
+        assert result == resp_data
+
+
+class TestPublicMethods:
+    def test_get_candles_returns_data_list(self, monkeypatch):
+        client = _make_client(monkeypatch)
+        candles = [["1700000000000", "50000", "51000", "49000", "50500", "10", "500000"]]
+        mock_resp = _mock_response({"code": "0", "data": candles})
+        client._session.get = MagicMock(return_value=mock_resp)
+        result = client.get_candles("BTC-USDT", "15m", 100)
+        assert result == candles
+
+    def test_get_candles_empty_on_no_data(self, monkeypatch):
+        client = _make_client(monkeypatch)
+        mock_resp = _mock_response({"code": "0"})
+        client._session.get = MagicMock(return_value=mock_resp)
+        result = client.get_candles("BTC-USDT")
+        assert result == []
+
+    def test_get_ticker_returns_first_entry(self, monkeypatch):
+        client = _make_client(monkeypatch)
+        ticker = {"instId": "BTC-USDT", "last": "50000"}
+        mock_resp = _mock_response({"code": "0", "data": [ticker]})
+        client._session.get = MagicMock(return_value=mock_resp)
+        result = client.get_ticker("BTC-USDT")
+        assert result == ticker
+
+    def test_get_ticker_empty_dict_when_no_data(self, monkeypatch):
+        client = _make_client(monkeypatch)
+        mock_resp = _mock_response({"code": "0", "data": []})
+        client._session.get = MagicMock(return_value=mock_resp)
+        result = client.get_ticker("BTC-USDT")
+        assert result == {}
+
+    def test_get_balance_returns_data(self, monkeypatch):
+        client = _make_client(monkeypatch)
+        balance = {"totalEquity": "10000"}
+        mock_resp = _mock_response({"code": "0", "data": balance})
+        client._session.get = MagicMock(return_value=mock_resp)
+        result = client.get_balance()
+        assert result == balance
+
+    def test_get_positions_returns_list(self, monkeypatch):
+        client = _make_client(monkeypatch)
+        positions = [{"instId": "BTC-USDT", "positions": "0.1"}]
+        mock_resp = _mock_response({"code": "0", "data": positions})
+        client._session.get = MagicMock(return_value=mock_resp)
+        result = client.get_positions("BTC-USDT")
+        assert result == positions
+
+    def test_get_positions_empty_when_none(self, monkeypatch):
+        client = _make_client(monkeypatch)
+        mock_resp = _mock_response({"code": "0", "data": []})
+        client._session.get = MagicMock(return_value=mock_resp)
+        result = client.get_positions("BTC-USDT")
+        assert result == []
+

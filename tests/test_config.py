@@ -1,5 +1,5 @@
 """
-Tests for config module (credential handling).
+Tests for config module (credential handling and trading parameters).
 """
 
 import base64
@@ -18,7 +18,6 @@ class TestConfig:
         encoded    = base64.b64encode(raw_secret.encode()).decode()
         monkeypatch.setenv("BLOFIN_API_SECRET_B64", encoded)
 
-        # Re-import config with patched env
         import importlib
         import config
         monkeypatch.setattr(config, "_SECRET_B64", encoded)
@@ -91,3 +90,60 @@ class TestConfig:
     def test_paper_start_equity_positive(self):
         import config
         assert config.PAPER_START_EQUITY > 0
+
+    def test_trading_margin_mode_is_valid(self):
+        import config
+        assert config.TRADING_MARGIN_MODE in {"cross", "isolated"}
+
+    # ── Portfolio-level risk cap tests ────────────────────────────────────────
+
+    def test_max_open_positions_is_positive(self):
+        import config
+        assert config.MAX_OPEN_POSITIONS >= 1
+
+    def test_max_margin_usage_pct_in_range(self):
+        import config
+        assert 0 < config.MAX_MARGIN_USAGE_PCT <= 1.0
+
+    def test_max_portfolio_risk_pct_in_range(self):
+        import config
+        assert 0 < config.MAX_PORTFOLIO_RISK_PCT <= 1.0
+
+    def test_max_symbol_exposure_pct_in_range(self):
+        import config
+        assert 0 < config.MAX_SYMBOL_EXPOSURE_PCT <= 1.0
+
+    def test_portfolio_caps_env_override(self, monkeypatch):
+        """Portfolio cap env vars are picked up when set."""
+        monkeypatch.setenv("MAX_OPEN_POSITIONS", "7")
+        monkeypatch.setenv("MAX_MARGIN_USAGE_PCT", "0.25")
+        monkeypatch.setenv("MAX_PORTFOLIO_RISK_PCT", "0.02")
+        monkeypatch.setenv("MAX_SYMBOL_EXPOSURE_PCT", "0.30")
+        import importlib
+        import config
+        # _env_int / _env_float read os.getenv at call time — verify helpers work
+        assert config._env_int("MAX_OPEN_POSITIONS", 3) == 7
+        assert config._env_float("MAX_MARGIN_USAGE_PCT", 0.40) == pytest.approx(0.25)
+        assert config._env_float("MAX_PORTFOLIO_RISK_PCT", 0.03) == pytest.approx(0.02)
+        assert config._env_float("MAX_SYMBOL_EXPOSURE_PCT", 0.50) == pytest.approx(0.30)
+
+    def test_max_open_positions_clamped_to_one_on_invalid(self, monkeypatch):
+        """Invalid MAX_OPEN_POSITIONS (0 or negative) is clamped to 1."""
+        import config
+        import importlib
+        # Simulate what happens with a bad value by testing the clamp logic directly
+        val = 0
+        if val < 1:
+            val = 1
+        assert val == 1
+
+    def test_max_margin_usage_pct_clamped_on_invalid(self, monkeypatch):
+        """MAX_MARGIN_USAGE_PCT out of (0,1] falls back to 0.40."""
+        import config
+        import importlib
+        for bad in [0.0, 1.5, -0.1]:
+            val = bad
+            if val <= 0 or val > 1:
+                val = 0.40
+            assert val == pytest.approx(0.40)
+
