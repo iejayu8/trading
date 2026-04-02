@@ -702,6 +702,54 @@ class TestApiMarketContext:
         assert isinstance(data["long_checks"], dict)
         assert isinstance(data["short_checks"], dict)
 
+    def test_diagnostics_not_stuck_when_display_limit_small(self, app_client):
+        """
+        Regression: when the frontend requests a small display limit (e.g. 50),
+        the endpoint must still fetch MIN_BARS_REQUIRED candles internally so
+        get_signal_diagnostics() does not permanently return
+        "Collecting candles (60/200)".
+
+        The mock returns 200 candles regardless of the requested limit, which
+        mirrors the real exchange.  With 200 rows the diagnostics engine should
+        move past the data-collection guard and produce a meaningful status
+        (anything other than the collecting-candles message).
+        """
+        with patch("app.BloFinClient") as MockClient:
+            MockClient.return_value.get_candles.return_value = _make_fake_candles(200)
+            data = app_client.get(
+                "/api/market/context?symbol=BTC-USDT&limit=50"
+            ).get_json()
+
+        assert data["ok"] is True
+        # Chart candles are still capped at the display limit (clamped to 60).
+        assert len(data["candles"]) <= 60
+        # Diagnostics must NOT be stuck on the data-collection guard.
+        waiting = data["diagnostics"].get("waiting_for", "")
+        assert "Collecting candles" not in waiting, (
+            f"Diagnostics still show data-collection phase with 200 candles: {waiting!r}"
+        )
+
+    def test_fetch_limit_uses_min_bars_required(self, app_client):
+        """
+        Regression: the exchange must be called with at least MIN_BARS_REQUIRED
+        candles even when the display limit is lower, so diagnostics are accurate.
+        """
+        with patch("app.BloFinClient") as MockClient:
+            MockClient.return_value.get_candles.return_value = _make_fake_candles(200)
+            app_client.get("/api/market/context?symbol=BTC-USDT&limit=50")
+
+        call_kwargs = MockClient.return_value.get_candles.call_args
+        # Third positional arg or 'limit' keyword arg holds the fetch limit.
+        actual_limit = (
+            call_kwargs.kwargs.get("limit")
+            if call_kwargs.kwargs.get("limit") is not None
+            else call_kwargs.args[2] if len(call_kwargs.args) > 2 else None
+        )
+        assert actual_limit is not None, "get_candles was not called with a limit argument"
+        assert actual_limit >= 200, (
+            f"get_candles called with limit={actual_limit}, expected ≥ 200"
+        )
+
 
 # ── Static file serving ───────────────────────────────────────────────────────
 

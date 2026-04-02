@@ -201,13 +201,12 @@ async function refreshBotStatus() {
   document.getElementById('kpi-equity').textContent =
     equity != null ? `$${Number(equity).toFixed(2)}` : '–';
 
-  // Update price and signal status cards for every symbol from the bulk status
+  // Update signal cards from bulk status (DB). Price is intentionally skipped
+  // here because refreshOneSymbolCards() fetches a live price from the exchange
+  // and updating from the DB (which is only written every 15 min by the bot
+  // tick) would race against and overwrite the fresher live value.
   for (const [sym, s] of Object.entries(allStatus)) {
     const sid = symId(sym);
-    if (s.last_price) {
-      const priceEl = document.getElementById(`kpi-price-${sid}`);
-      if (priceEl) priceEl.textContent = formatPrice(s.last_price);
-    }
     const sigEl = document.getElementById(`kpi-signal-${sid}`);
     if (sigEl) {
       const sig = (s.last_signal && s.last_signal !== 'NONE') ? s.last_signal : '–';
