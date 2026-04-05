@@ -48,9 +48,16 @@
     </section>
 
     <!-- ── Live Symbol Status (all symbols) ────────────────────────────── -->
-    <section class="panel" id="all-symbols-status-panel">
-      <h2 class="panel__title">Live Symbol Status</h2>
-      <div id="all-symbols-status">
+    <section class="panel collapsible-panel" id="all-symbols-status-panel">
+      <div class="panel__head panel__head--with-tabs">
+        <div class="panel__head-left">
+          <h2 class="panel__title">Live Symbol Status</h2>
+        </div>
+        <button class="btn--collapse" id="btn-collapse-symbols"
+                onclick="togglePanel('all-symbols-status', 'btn-collapse-symbols')"
+                title="Expand">▼</button>
+      </div>
+      <div class="panel-body collapsed" id="all-symbols-status">
         <!-- Per-symbol status rows injected by JS -->
       </div>
     </section>
