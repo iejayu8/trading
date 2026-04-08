@@ -34,7 +34,7 @@ class TestDatabase:
             pass
 
     def test_init_creates_tables(self):
-        with database._connect() as conn:
+        with database._db() as conn:
             tables = {
                 row[0]
                 for row in conn.execute(

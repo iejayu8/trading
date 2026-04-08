@@ -10,6 +10,7 @@ bot_status   – singleton row tracking current bot state
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sqlite3
 from datetime import datetime, timezone
@@ -18,16 +19,32 @@ from pathlib import Path
 DB_PATH = Path(os.getenv("TRADING_DB_PATH", str(Path(__file__).parent / "trading_bot.db")))
 
 
-def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(DB_PATH))
+@contextlib.contextmanager
+def _db():
+    """Open a SQLite connection, yield it inside a transaction, then close it.
+
+    Uses WAL journal mode and a 10-second busy-timeout so concurrent bot
+    threads do not immediately raise ``OperationalError: database is locked``.
+    The connection is always closed on exit — unlike the bare
+    ``with sqlite3.connect(...) as conn:`` pattern which only
+    commits/rolls back but never closes the underlying file handle.
+    """
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+    try:
+        yield conn
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def init_db() -> None:
     """Create tables if they don't exist."""
-    with _connect() as conn:
+    with _db() as conn:
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS trades (
@@ -128,7 +145,7 @@ def open_trade(
     leverage: int,
 ) -> int:
     now = datetime.now(timezone.utc).isoformat()
-    with _connect() as conn:
+    with _db() as conn:
         cur = conn.execute(
             """
             INSERT INTO trades
@@ -143,7 +160,7 @@ def open_trade(
 
 def close_trade(trade_id: int, exit_price: float, pnl: float) -> None:
     now = datetime.now(timezone.utc).isoformat()
-    with _connect() as conn:
+    with _db() as conn:
         conn.execute(
             """
             UPDATE trades
@@ -155,7 +172,7 @@ def close_trade(trade_id: int, exit_price: float, pnl: float) -> None:
 
 
 def get_open_trades(symbol: str | None = None) -> list[dict]:
-    with _connect() as conn:
+    with _db() as conn:
         if symbol:
             rows = conn.execute(
                 "SELECT * FROM trades WHERE status='OPEN' AND symbol=?", (symbol,)
@@ -168,7 +185,7 @@ def get_open_trades(symbol: str | None = None) -> list[dict]:
 
 
 def get_trade_history(symbol: str | None = None, limit: int = 100) -> list[dict]:
-    with _connect() as conn:
+    with _db() as conn:
         if symbol:
             rows = conn.execute(
                 "SELECT * FROM trades WHERE symbol=? ORDER BY id DESC LIMIT ?",
@@ -182,7 +199,7 @@ def get_trade_history(symbol: str | None = None, limit: int = 100) -> list[dict]
 
 
 def get_trade_stats(symbol: str | None = None) -> dict:
-    with _connect() as conn:
+    with _db() as conn:
         if symbol:
             row = conn.execute(
                 """
@@ -225,7 +242,7 @@ def get_trade_stats(symbol: str | None = None) -> dict:
 
 def log_event(message: str, level: str = "INFO") -> None:
     now = datetime.now(timezone.utc).isoformat()
-    with _connect() as conn:
+    with _db() as conn:
         conn.execute(
             "INSERT INTO bot_logs (level, message, ts) VALUES (?, ?, ?)",
             (level, message, now),
@@ -233,7 +250,7 @@ def log_event(message: str, level: str = "INFO") -> None:
 
 
 def get_logs(limit: int = 100) -> list[dict]:
-    with _connect() as conn:
+    with _db() as conn:
         rows = conn.execute(
             "SELECT * FROM bot_logs ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
@@ -242,7 +259,7 @@ def get_logs(limit: int = 100) -> list[dict]:
 
 def clear_logs() -> None:
     """Delete all activity log entries."""
-    with _connect() as conn:
+    with _db() as conn:
         conn.execute("DELETE FROM bot_logs")
 
 
@@ -272,7 +289,7 @@ def update_bot_status(symbol: str, **kwargs) -> None:
     kwargs["updated_at"] = datetime.now(timezone.utc).isoformat()
     set_clause = ", ".join(f"{k} = ?" for k in kwargs)
     values = list(kwargs.values()) + [symbol]
-    with _connect() as conn:
+    with _db() as conn:
         _ensure_symbol_status(conn, symbol)
         conn.execute(
             f"UPDATE bot_status SET {set_clause} WHERE symbol = ?", values
@@ -280,7 +297,7 @@ def update_bot_status(symbol: str, **kwargs) -> None:
 
 
 def get_bot_status(symbol: str) -> dict:
-    with _connect() as conn:
+    with _db() as conn:
         _ensure_symbol_status(conn, symbol)
         row = conn.execute(
             "SELECT * FROM bot_status WHERE symbol = ?", (symbol,)
@@ -290,6 +307,7 @@ def get_bot_status(symbol: str) -> dict:
 
 def get_all_bot_status() -> list[dict]:
     """Return status rows for all symbols."""
-    with _connect() as conn:
+    with _db() as conn:
         rows = conn.execute("SELECT * FROM bot_status ORDER BY symbol").fetchall()
     return [dict(r) for r in rows]
+
