@@ -66,6 +66,9 @@ CORS(app)
 # Ensure DB tables exist regardless of how Flask is started (subprocess, embedded,
 # or `flask run`).  init_db() is idempotent so calling it multiple times is safe.
 db.init_db()
+# Clear stale running=1 flags left by any previous (crashed/killed) server process.
+# No bot threads survive a server restart, so the DB must reflect that.
+db.reset_running_flags()
 
 
 # ── Frontend ──────────────────────────────────────────────────────────────────
@@ -222,12 +225,19 @@ def api_stop():
         bot.stop()
         return jsonify({"ok": True, "message": f"{symbol} bot stopped"})
 
-    # Stop all bots
+    # Stop all bots — check both in-memory threads and any orphaned DB flags.
     stopped = []
-    for sym, bot in list(_bots.items()):
-        if bot.is_running:
+    for sym in config.SUPPORTED_SYMBOLS:
+        bot = _bots.get(sym)
+        if bot and bot.is_running:
             bot.stop()
             stopped.append(sym)
+        else:
+            # Ensure DB is clean even if the in-memory bot is gone/stale.
+            status = db.get_bot_status(sym)
+            if status.get("running") == 1:
+                db.update_bot_status(symbol=sym, running=0)
+                stopped.append(sym)
     if not stopped:
         return jsonify({"ok": False, "message": "No bots are running"}), 400
     return jsonify({"ok": True, "message": f"Stopped bots: {', '.join(stopped)}"})

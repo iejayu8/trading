@@ -311,3 +311,18 @@ def get_all_bot_status() -> list[dict]:
         rows = conn.execute("SELECT * FROM bot_status ORDER BY symbol").fetchall()
     return [dict(r) for r in rows]
 
+
+def reset_running_flags() -> None:
+    """Set running=0 for every symbol.
+
+    Called once on server startup so stale running=1 entries left by a
+    previous (crashed or killed) process don't confuse the frontend.
+    No bot threads survive a server restart, so the DB must reflect that.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    with _db() as conn:
+        conn.execute(
+            "UPDATE bot_status SET running = 0, updated_at = ?",
+            (now,),
+        )
+
