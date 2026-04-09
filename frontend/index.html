@@ -54,7 +54,6 @@
           <h2 class="panel__title">Live Symbol Status</h2>
         </div>
         <button class="btn--collapse" id="btn-collapse-symbols"
-                onclick="togglePanel('all-symbols-status', 'btn-collapse-symbols')"
                 title="Expand">▼</button>
       </div>
       <div class="panel-body collapsed" id="all-symbols-status">
@@ -73,7 +72,6 @@
             <div class="panel-tabs" id="param-tabs"></div>
           </div>
           <button class="btn--collapse" id="btn-collapse-params"
-                  onclick="togglePanel('param-body', 'btn-collapse-params')"
                   title="Expand">▼</button>
         </div>
         <div class="panel-body collapsed" id="param-body">
@@ -92,7 +90,6 @@
             <div class="panel-tabs" id="chart-tabs"></div>
           </div>
           <button class="btn--collapse" id="btn-collapse-chart"
-                  onclick="togglePanel('chart-body', 'btn-collapse-chart')"
                   title="Collapse">▲</button>
         </div>
         <div class="panel-body" id="chart-body">
@@ -125,8 +122,8 @@
             <tr>
               <th>#</th><th>Symbol</th><th>Direction</th><th>Entry</th><th>Exit</th>
               <th>Size</th><th>Value (USDT)</th><th>SL</th><th>TP</th>
-              <th>SL Loss</th><th>TP Profit</th>
-              <th>PnL (USDT)</th><th>Status</th><th>Opened</th>
+              <th>SL Loss</th><th>TP Profit</th><th>Current Profit</th>
+              <th>PnL (USDT)</th><th>Status</th><th>Opened</th><th>Actions</th>
             </tr>
           </thead>
           <tbody></tbody>

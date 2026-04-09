@@ -89,6 +89,7 @@ header {
 .btn:disabled { opacity: 0.35; cursor: default; }
 .btn--success { background: var(--green);  color: #0d1117; }
 .btn--danger  { background: var(--red);    color: #fff; }
+.btn--small   { padding: 3px 10px; font-size: 12px; }
 .btn:not(:disabled):hover { opacity: 0.85; }
 
 /* ── Main content ─────────────────────────────────────────────────────────── */
