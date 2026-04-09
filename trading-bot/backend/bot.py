@@ -50,6 +50,7 @@ class TradingBot:
     """15-minute candle trading bot for BloFin futures."""
 
     CANDLE_SECONDS = 15 * 60  # 900 s
+    PRICE_SYNC_SECONDS = 5 * 60  # 300 s – ticker refresh between candle ticks
     MAX_API_RETRIES = 3
     RETRY_BASE_SECONDS = 0.7
 
@@ -61,6 +62,7 @@ class TradingBot:
         self._client = BloFinClient()
         self._running = False
         self._thread: threading.Thread | None = None
+        self._price_thread: threading.Thread | None = None
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
 
@@ -92,6 +94,8 @@ class TradingBot:
             db.update_bot_status(symbol=self.symbol, equity=self._paper_equity())
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
+        self._price_thread = threading.Thread(target=self._price_sync_loop, daemon=True)
+        self._price_thread.start()
 
     def stop(self) -> None:
         with self._lock:
@@ -101,6 +105,8 @@ class TradingBot:
         # Join briefly for a cleaner shutdown without blocking too long.
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2)
+        if self._price_thread and self._price_thread.is_alive():
+            self._price_thread.join(timeout=2)
 
         db.update_bot_status(symbol=self.symbol, running=0)
         db.log_event(f"Bot stopped ({self.symbol})")
@@ -129,6 +135,32 @@ class TradingBot:
                 break
 
         db.log_event("Trading loop exited")
+
+    def _price_sync_loop(self) -> None:
+        """Lightweight loop that refreshes last_price every 5 minutes via ticker.
+
+        Runs in a separate thread so the dashboard always shows a recent price
+        even during the long gap between 15-minute candle ticks.
+        Paper-trading mode uses the ticker price as well so unrealised PnL on
+        the dashboard stays accurate between candle closes.
+        """
+        # Stagger the first sync by 30 s so it doesn't collide with the initial tick.
+        if self._stop_event.wait(timeout=30):
+            return
+
+        while self._running:
+            try:
+                ticker = self._client.get_ticker(self.symbol)
+                # BloFin ticker fields: "last" is the last traded price.
+                raw_price = ticker.get("last") or ticker.get("lastPr")
+                if raw_price is not None:
+                    price = float(raw_price)
+                    db.update_bot_status(symbol=self.symbol, last_price=price)
+            except Exception as exc:  # noqa: BLE001
+                db.log_event(f"Price sync error ({self.symbol}): {exc}", level="WARNING")
+
+            if self._stop_event.wait(timeout=self.PRICE_SYNC_SECONDS):
+                break
 
     def _tick(self) -> None:
         """Evaluate market and act on one candle close."""
