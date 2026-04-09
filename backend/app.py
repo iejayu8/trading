@@ -190,7 +190,7 @@ def api_close_trade(trade_id: int):
 
     current_price = float(current_price)
 
-    if config.TRADING_MODE != "paper":
+    if config.TRADING_MODE != "papertrading":
         try:
             client = BloFinClient()
             close_side = "sell" if direction == "LONG" else "buy"
@@ -439,4 +439,9 @@ if __name__ == "__main__":
         sys.exit(1)
     db.init_db()
     db.log_event("Server started")
+    # Auto-start all symbol bots so the bot runs immediately on addon init.
+    for _sym in config.SUPPORTED_SYMBOLS:
+        _bot = _get_bot(_sym)
+        _bot.start()
+        db.log_event(f"Auto-started bot for {_sym}")
     app.run(host="0.0.0.0", port=5000, debug=False)

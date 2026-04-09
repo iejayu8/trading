@@ -25,19 +25,20 @@ let _symbols = [];               // list from /api/symbols
 
 // ── Boot ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
-  // Wire collapse buttons via event listeners (safer than inline onclick for
-  // environments with a restrictive Content-Security-Policy, such as HA ingress).
-  document.getElementById('btn-collapse-symbols')
-    ?.addEventListener('click', () => togglePanel('all-symbols-status', 'btn-collapse-symbols'));
-  document.getElementById('btn-collapse-params')
-    ?.addEventListener('click', () => togglePanel('param-body', 'btn-collapse-params'));
-  document.getElementById('btn-collapse-chart')
-    ?.addEventListener('click', () => togglePanel('chart-body', 'btn-collapse-chart'));
-
   await initSymbols();
   await refreshAll();
   setInterval(refreshAll, POLL_INTERVAL);
 });
+
+// Wire collapse buttons at script-evaluation time (app.js is bottom-of-body,
+// so all elements exist in the DOM when this runs). This avoids any DOMContentLoaded
+// async-timing issues in Home Assistant's ingress environment.
+document.getElementById('btn-collapse-symbols')
+  ?.addEventListener('click', () => togglePanel('all-symbols-status', 'btn-collapse-symbols'));
+document.getElementById('btn-collapse-params')
+  ?.addEventListener('click', () => togglePanel('param-body', 'btn-collapse-params'));
+document.getElementById('btn-collapse-chart')
+  ?.addEventListener('click', () => togglePanel('chart-body', 'btn-collapse-chart'));
 
 // ── Symbol tab initialisation ─────────────────────────────────────────────
 
