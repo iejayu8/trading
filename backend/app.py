@@ -11,7 +11,7 @@ GET  /api/trades/open          – open trades (all or ?symbol=X)
 GET  /api/stats                – aggregate performance statistics
 GET  /api/stats?symbol=X       – per-symbol performance statistics
 GET  /api/logs                 – bot activity log
-POST /api/logs/clear           – clear activity log
+POST /api/trades/<id>/close   – manually close an open trade at current market price
 POST /api/bot/start            – start all symbol bots
 POST /api/bot/start?symbol=X   – start single symbol bot
 POST /api/bot/stop             – stop all symbol bots
@@ -164,6 +164,53 @@ def api_trades():
 def api_open_trades():
     symbol = request.args.get("symbol")
     return jsonify(db.get_open_trades(symbol=symbol))
+
+
+@app.post("/api/trades/<int:trade_id>/close")
+def api_close_trade(trade_id: int):
+    import time
+    from uuid import uuid4
+
+    trade = db.get_trade_by_id(trade_id)
+    if not trade:
+        return jsonify({"ok": False, "message": "Trade not found"}), 404
+    if trade["status"] != "OPEN":
+        return jsonify({"ok": False, "message": "Trade is not open"}), 400
+
+    symbol = trade["symbol"]
+    direction = trade["direction"]
+    size = trade["size"]
+    entry = float(trade["entry_price"])
+
+    # Get current price from the last known bot status for this symbol.
+    status = db.get_bot_status(symbol)
+    current_price = status.get("last_price")
+    if not current_price:
+        return jsonify({"ok": False, "message": "Current price unavailable — start the bot first"}), 502
+
+    current_price = float(current_price)
+
+    if config.TRADING_MODE != "paper":
+        try:
+            client = BloFinClient()
+            close_side = "sell" if direction == "LONG" else "buy"
+            close_cid = f"manual-close-{symbol}-{int(time.time() * 1000)}-{uuid4().hex[:8]}"
+            resp = client.place_order(symbol, close_side, "market", size, client_order_id=close_cid)
+            code = str(resp.get("code", "0")) if isinstance(resp, dict) else "0"
+            if code != "0":
+                return jsonify({"ok": False, "message": f"Exchange rejected close (code={code}): {resp.get('msg', '')}"}), 502
+        except Exception as exc:
+            return jsonify({"ok": False, "message": f"Exchange error: {exc}"}), 502
+
+    if direction == "LONG":
+        pnl = round((current_price - entry) / entry * entry * size, 4)
+    else:
+        pnl = round((entry - current_price) / entry * entry * size, 4)
+
+    db.close_trade(trade_id, current_price, pnl)
+    db.log_event(f"Trade {trade_id} manually closed @ {current_price:.2f}  PnL={pnl:.4f} USDT")
+
+    return jsonify({"ok": True, "message": f"Trade {trade_id} closed", "pnl": pnl, "exit_price": current_price})
 
 
 @app.get("/api/stats")

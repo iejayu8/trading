@@ -962,3 +962,110 @@ class TestRobustness:
         """GET on /api/bot/stop returns 404 via the static catch-all (no extension)."""
         resp = app_client.get("/api/bot/stop")
         assert resp.status_code == 404
+
+
+# ── Equity display correctness ────────────────────────────────────────────────
+
+class TestEquityDisplay:
+    """Verify that /api/status exposes the equity field so the frontend
+    can keep the dashboard KPI card current after trade closes."""
+
+    def test_equity_null_by_default(self, app_client):
+        """Before any bot tick equity is null (not a stale zero)."""
+        data = app_client.get("/api/status?symbol=BTC-USDT").get_json()
+        # equity should be absent or null; it must not be silently initialised to 0
+        assert data.get("equity") is None or data["equity"] is None
+
+    def test_equity_persists_after_update(self, app_client):
+        """Once written, equity is returned by /api/status."""
+        database.update_bot_status(symbol="BTC-USDT", equity=1234.56)
+        data = app_client.get("/api/status?symbol=BTC-USDT").get_json()
+        assert data["equity"] is not None
+        assert abs(float(data["equity"]) - 1234.56) < 0.01
+
+    def test_all_status_includes_equity_field(self, app_client):
+        """All-symbols status dict includes an 'equity' key for each symbol."""
+        data = app_client.get("/api/status").get_json()
+        for sym, status in data.items():
+            assert "equity" in status, f"equity missing from status for {sym}"
+
+    def test_equity_updated_after_pnl_increases(self, app_client):
+        """Equity reflects PnL: writing a higher value is visible immediately."""
+        database.update_bot_status(symbol="BTC-USDT", equity=1000.0)
+        database.update_bot_status(symbol="BTC-USDT", equity=1050.0)
+        data = app_client.get("/api/status?symbol=BTC-USDT").get_json()
+        assert abs(float(data["equity"]) - 1050.0) < 0.01
+
+    def test_equity_updated_after_loss(self, app_client):
+        """Equity can decrease (loss scenario)."""
+        database.update_bot_status(symbol="BTC-USDT", equity=1000.0)
+        database.update_bot_status(symbol="BTC-USDT", equity=970.0)
+        data = app_client.get("/api/status?symbol=BTC-USDT").get_json()
+        assert abs(float(data["equity"]) - 970.0) < 0.01
+
+    def test_multi_symbol_equity_independent(self, app_client):
+        """Per-symbol equity values do not interfere with each other."""
+        database.update_bot_status(symbol="BTC-USDT", equity=2000.0)
+        database.update_bot_status(symbol="ETH-USDT", equity=500.0)
+        all_status = app_client.get("/api/status").get_json()
+        assert abs(float(all_status["BTC-USDT"]["equity"]) - 2000.0) < 0.01
+        assert abs(float(all_status["ETH-USDT"]["equity"]) - 500.0) < 0.01
+
+
+# ── Frontend HTML – collapse button wiring ────────────────────────────────────
+
+class TestCollapseButtonWiring:
+    """Inline onclick handlers are blocked by Content-Security-Policy in
+    Home Assistant's ingress proxy.  Collapse buttons must NOT use them."""
+
+    def _get_index_html(self):
+        from pathlib import Path
+        import os
+        frontend = Path(__file__).parent.parent / "frontend" / "index.html"
+        return frontend.read_text(encoding="utf-8")
+
+    def test_no_inline_onclick_on_collapse_symbols_button(self):
+        """btn-collapse-symbols must not use an inline onclick attribute."""
+        html = self._get_index_html()
+        # Extract the btn-collapse-symbols button element (rough check)
+        assert 'id="btn-collapse-symbols"' in html
+        # Ensure the onclick attr is not next to this button's id
+        import re
+        btn_match = re.search(
+            r'id="btn-collapse-symbols"[^>]*>', html
+        )
+        assert btn_match, "btn-collapse-symbols not found in HTML"
+        assert "onclick" not in btn_match.group(0), (
+            "btn-collapse-symbols must not use inline onclick (CSP violation)"
+        )
+
+    def test_no_inline_onclick_on_collapse_params_button(self):
+        html = self._get_index_html()
+        import re
+        btn_match = re.search(r'id="btn-collapse-params"[^>]*>', html)
+        assert btn_match
+        assert "onclick" not in btn_match.group(0)
+
+    def test_no_inline_onclick_on_collapse_chart_button(self):
+        html = self._get_index_html()
+        import re
+        btn_match = re.search(r'id="btn-collapse-chart"[^>]*>', html)
+        assert btn_match
+        assert "onclick" not in btn_match.group(0)
+
+    def test_toggle_panel_function_defined_in_app_js(self):
+        """togglePanel must remain available in app.js."""
+        from pathlib import Path
+        js = (Path(__file__).parent.parent / "frontend" / "app.js").read_text(encoding="utf-8")
+        assert "function togglePanel(" in js
+
+    def test_event_listeners_registered_for_collapse_buttons(self):
+        """DOMContentLoaded handler in app.js must wire up all three
+        collapse buttons via addEventListener so they work under CSP."""
+        from pathlib import Path
+        js = (Path(__file__).parent.parent / "frontend" / "app.js").read_text(encoding="utf-8")
+        assert "btn-collapse-symbols" in js
+        assert "btn-collapse-params" in js
+        assert "btn-collapse-chart" in js
+        assert "addEventListener" in js
+

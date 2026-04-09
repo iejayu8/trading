@@ -229,3 +229,234 @@ class TestBotRobustness:
 
         assert len(closed_calls) == 1
         assert closed_calls[0][0] == 103
+
+
+# ── Equity update on trade close ───────────────────────────────────────────────
+
+class TestEquityUpdateOnTradeClose:
+    """Equity in bot_status must be refreshed immediately after a trade closes
+    in both paper and real trading mode so the dashboard never shows a stale value."""
+
+    def setup_method(self):
+        import tempfile
+        import database as _db
+        self._tmp = tempfile.mkdtemp()
+        _db.DB_PATH = Path(self._tmp) / "test_equity.db"
+        _db.init_db()
+
+    def teardown_method(self):
+        import database as _db
+        for p in Path(self._tmp).glob("*"):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+        try:
+            Path(self._tmp).rmdir()
+        except OSError:
+            pass
+
+    def test_paper_equity_updated_immediately_on_tp_hit(self, monkeypatch):
+        """After a TP is hit in paper mode the bot_status equity must equal
+        PAPER_START_EQUITY + realised PnL without waiting for the next tick."""
+        import config
+        import database as _db
+
+        monkeypatch.setattr(config, "TRADING_MODE", "papertrading")
+        monkeypatch.setattr(config, "PAPER_START_EQUITY", 1000.0)
+
+        bot = TradingBot(symbol="BTC-USDT")
+
+        trade_id = _db.open_trade(
+            symbol="BTC-USDT",
+            direction="LONG",
+            entry_price=100.0,
+            size=1.0,
+            sl_price=95.0,
+            tp_price=110.0,
+            leverage=5,
+        )
+        trade = _db.get_open_trades("BTC-USDT")[0]
+
+        bot._manage_open_trades([trade], current_price=110.0)
+
+        status = _db.get_bot_status("BTC-USDT")
+        assert status["equity"] is not None, "equity must be set after trade close"
+        # PnL for LONG: (exit - entry) * size = (110-100)*1 = 10
+        assert abs(status["equity"] - 1010.0) < 0.01, (
+            f"Expected equity ~1010.0, got {status['equity']}"
+        )
+
+    def test_paper_equity_updated_immediately_on_sl_hit(self, monkeypatch):
+        """A losing trade (SL hit) must reduce equity immediately."""
+        import config
+        import database as _db
+
+        monkeypatch.setattr(config, "TRADING_MODE", "papertrading")
+        monkeypatch.setattr(config, "PAPER_START_EQUITY", 1000.0)
+
+        bot = TradingBot(symbol="BTC-USDT")
+
+        trade_id = _db.open_trade(
+            symbol="BTC-USDT",
+            direction="LONG",
+            entry_price=100.0,
+            size=1.0,
+            sl_price=95.0,
+            tp_price=110.0,
+            leverage=5,
+        )
+        trade = _db.get_open_trades("BTC-USDT")[0]
+
+        bot._manage_open_trades([trade], current_price=94.0)
+
+        status = _db.get_bot_status("BTC-USDT")
+        assert status["equity"] is not None
+        # PnL = (94-100)*1 = -6  →  equity = 994
+        assert status["equity"] < 1000.0, (
+            "equity must decrease after a losing trade"
+        )
+
+    def test_paper_equity_updated_on_reconciliation_close(self, monkeypatch):
+        """Stale trades closed during reconciliation must also update equity."""
+        import config
+        import database as _db
+
+        monkeypatch.setattr(config, "TRADING_MODE", "papertrading")
+        monkeypatch.setattr(config, "PAPER_START_EQUITY", 1000.0)
+
+        bot = TradingBot(symbol="BTC-USDT")
+
+        _db.open_trade(
+            symbol="BTC-USDT",
+            direction="LONG",
+            entry_price=100.0,
+            size=1.0,
+            sl_price=95.0,
+            tp_price=110.0,
+            leverage=5,
+        )
+        trade = _db.get_open_trades("BTC-USDT")[0]
+
+        bot._reconcile_local_open_trades(
+            [trade], exchange_has_position=False, mark_price=105.0
+        )
+
+        status = _db.get_bot_status("BTC-USDT")
+        assert status["equity"] is not None
+        # PnL = (105-100)*1 = 5  →  equity = 1005
+        assert status["equity"] > 1000.0
+
+    def test_real_equity_updated_immediately_on_tp_hit(self, monkeypatch):
+        """In real trading mode equity must be re-fetched from the exchange
+        immediately after a TP closes so the dashboard reflects new balance."""
+        import config
+        import database as _db
+
+        monkeypatch.setattr(config, "TRADING_MODE", "realtrading")
+
+        bot = TradingBot(symbol="BTC-USDT")
+
+        # Simulate exchange returning updated balance after close.
+        def mock_get_balance():
+            return {"equity": "1025.50"}
+
+        monkeypatch.setattr(bot._client, "get_balance", mock_get_balance)
+
+        # Exchange close order succeeds.
+        monkeypatch.setattr(
+            bot._client,
+            "place_order",
+            lambda *a, **k: {"code": "0"},
+        )
+
+        _db.open_trade(
+            symbol="BTC-USDT",
+            direction="LONG",
+            entry_price=100.0,
+            size=1.0,
+            sl_price=95.0,
+            tp_price=110.0,
+            leverage=5,
+        )
+        trade = _db.get_open_trades("BTC-USDT")[0]
+
+        bot._manage_open_trades([trade], current_price=110.0)
+
+        status = _db.get_bot_status("BTC-USDT")
+        assert status["equity"] is not None
+        assert abs(float(status["equity"]) - 1025.50) < 0.01, (
+            f"Expected equity ~1025.50 from exchange, got {status['equity']}"
+        )
+
+    def test_real_equity_updated_on_reconciliation_close(self, monkeypatch):
+        """Reconciliation close in real mode must also refresh equity."""
+        import config
+        import database as _db
+
+        monkeypatch.setattr(config, "TRADING_MODE", "realtrading")
+
+        bot = TradingBot(symbol="BTC-USDT")
+
+        def mock_get_balance():
+            return {"equity": "990.00"}
+
+        monkeypatch.setattr(bot._client, "get_balance", mock_get_balance)
+
+        _db.open_trade(
+            symbol="BTC-USDT",
+            direction="LONG",
+            entry_price=100.0,
+            size=1.0,
+            sl_price=95.0,
+            tp_price=110.0,
+            leverage=5,
+        )
+        trade = _db.get_open_trades("BTC-USDT")[0]
+
+        bot._reconcile_local_open_trades(
+            [trade], exchange_has_position=False, mark_price=98.0
+        )
+
+        status = _db.get_bot_status("BTC-USDT")
+        assert status["equity"] is not None
+        assert abs(float(status["equity"]) - 990.00) < 0.01
+
+    def test_real_equity_balance_failure_is_tolerated(self, monkeypatch):
+        """If the exchange balance call fails after close, equity stays stale
+        but no exception is raised – the next tick will correct it."""
+        import config
+        import database as _db
+
+        monkeypatch.setattr(config, "TRADING_MODE", "realtrading")
+
+        bot = TradingBot(symbol="BTC-USDT")
+
+        def fail_get_balance():
+            raise RuntimeError("exchange timeout")
+
+        monkeypatch.setattr(bot._client, "get_balance", fail_get_balance)
+        monkeypatch.setattr(
+            bot._client,
+            "place_order",
+            lambda *a, **k: {"code": "0"},
+        )
+
+        _db.open_trade(
+            symbol="BTC-USDT",
+            direction="LONG",
+            entry_price=100.0,
+            size=1.0,
+            sl_price=95.0,
+            tp_price=110.0,
+            leverage=5,
+        )
+        trade = _db.get_open_trades("BTC-USDT")[0]
+
+        # Must not raise even though get_balance fails.
+        bot._manage_open_trades([trade], current_price=110.0)
+
+        # Trade should still be closed in DB.
+        open_trades = _db.get_open_trades("BTC-USDT")
+        assert open_trades == [], "trade must be locally closed even when balance fetch fails"
+

@@ -258,6 +258,10 @@ class TradingBot:
                 if self.paper_trading:
                     db.log_event(f"[PAPER] Simulated close for trade {trade['id']}")
 
+                # Refresh equity in bot_status immediately so the dashboard
+                # reflects the new balance without waiting for the next tick.
+                self._refresh_equity_after_close()
+
     def _portfolio_allows_entry(self, equity: float, new_price: float) -> bool:
         """Return True if opening a new position passes all portfolio-level caps.
 
@@ -458,6 +462,7 @@ class TradingBot:
             for trade in local_open_trades:
                 pnl = _calc_pnl(trade["direction"], trade["entry_price"], mark_price, trade["size"])
                 db.close_trade(trade["id"], mark_price, pnl)
+            self._refresh_equity_after_close()
             return []
 
         if exchange_has_position and not local_open_trades:
@@ -482,6 +487,32 @@ class TradingBot:
         if current_equity > 0:
             return (daily_pnl / current_equity) < -config.MAX_DAILY_LOSS_PCT
         return False
+
+    def _refresh_equity_after_close(self) -> None:
+        """Immediately refresh equity in bot_status after a trade closes.
+
+        For paper trading: recalculates from the DB (zero API calls).
+        For real trading: fetches the updated balance from the exchange
+        so the dashboard doesn't show a stale value until the next tick.
+        Failures are logged and silently swallowed – the next tick will
+        correct the value anyway.
+        """
+        try:
+            if self.paper_trading:
+                equity = self._paper_equity()
+            else:
+                balance_data = self._call_with_retries(
+                    self._client.get_balance,
+                    label="get_balance_after_close",
+                )
+                equity = _extract_usdt_equity(balance_data)
+            if equity is not None:
+                db.update_bot_status(symbol=self.symbol, equity=equity)
+        except Exception as exc:  # noqa: BLE001
+            db.log_event(
+                f"Could not refresh equity after trade close: {exc}",
+                level="WARNING",
+            )
 
     def _paper_equity(self) -> float:
         """Simulated equity for paper mode: start_equity + closed PnL for this symbol."""

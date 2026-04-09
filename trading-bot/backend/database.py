@@ -171,6 +171,14 @@ def close_trade(trade_id: int, exit_price: float, pnl: float) -> None:
         )
 
 
+def get_trade_by_id(trade_id: int) -> dict | None:
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT * FROM trades WHERE id = ?", (trade_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def get_open_trades(symbol: str | None = None) -> list[dict]:
     with _db() as conn:
         if symbol:

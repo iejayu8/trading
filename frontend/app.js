@@ -25,6 +25,15 @@ let _symbols = [];               // list from /api/symbols
 
 // ── Boot ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
+  // Wire collapse buttons via event listeners (safer than inline onclick for
+  // environments with a restrictive Content-Security-Policy, such as HA ingress).
+  document.getElementById('btn-collapse-symbols')
+    ?.addEventListener('click', () => togglePanel('all-symbols-status', 'btn-collapse-symbols'));
+  document.getElementById('btn-collapse-params')
+    ?.addEventListener('click', () => togglePanel('param-body', 'btn-collapse-params'));
+  document.getElementById('btn-collapse-chart')
+    ?.addEventListener('click', () => togglePanel('chart-body', 'btn-collapse-chart'));
+
   await initSymbols();
   await refreshAll();
   setInterval(refreshAll, POLL_INTERVAL);
@@ -198,9 +207,11 @@ async function refreshBotStatus() {
   modeEl.textContent = mode.toUpperCase();
   modeEl.className = 'card__value ' + modeClass(mode);
 
-  let equity = null;
-  for (const s of Object.values(allStatus)) {
-    if (s.equity != null) { equity = s.equity; break; }
+  let equity = activeStatus.equity != null ? activeStatus.equity : null;
+  if (equity === null) {
+    for (const s of Object.values(allStatus)) {
+      if (s.equity != null) { equity = s.equity; break; }
+    }
   }
   document.getElementById('kpi-equity').textContent =
     equity != null ? `$${Number(equity).toFixed(2)}` : '–';
@@ -393,14 +404,22 @@ async function refreshCommonTradePanels() {
 }
 
 async function refreshTradeHistory() {
-  let trades;
+  let trades, statusMap;
   try { trades = await fetchJSON(`${API}/trades?limit=50`); }
   catch { return; }
+
+  // Fetch current prices per symbol for unrealised PnL on open trades.
+  try {
+    const allStatus = await fetchJSON(`${API}/status`);
+    statusMap = allStatus;
+  } catch {
+    statusMap = {};
+  }
 
   const tbody = document.querySelector('#trade-table tbody');
   tbody.innerHTML = '';
   if (!trades.length) {
-    tbody.innerHTML = '<tr><td colspan="14" class="empty-msg" style="padding:12px">No trades yet</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="16" class="empty-msg" style="padding:12px">No trades yet</td></tr>';
     return;
   }
 
@@ -409,11 +428,10 @@ async function refreshTradeHistory() {
     const pnlStr = pnl != null
       ? `<span class="${pnl >= 0 ? 'text-green' : 'text-red'}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}</span>`
       : '–';
-    const dirCls = t.direction === 'LONG' ? 'text-green' : 'text-red';
     const value = Number(t.size) * Number(t.entry_price);
 
-    const entry = Number(t.entry_price);
-    const size  = Number(t.size);
+    const entry  = Number(t.entry_price);
+    const size   = Number(t.size);
     const isLong = t.direction === 'LONG';
 
     let slLossStr = '–';
@@ -430,24 +448,60 @@ async function refreshTradeHistory() {
       tpProfitStr = `<span class="text-green">+${tpProfit.toFixed(2)}</span>`;
     }
 
+    // Current Profit: unrealised for OPEN trades, realised for CLOSED trades.
+    let currentProfitStr = '–';
+    if (t.status === 'OPEN') {
+      const symStatus = statusMap[t.symbol];
+      const cp = symStatus && symStatus.last_price != null ? Number(symStatus.last_price) : null;
+      if (cp != null) {
+        const cpPnl = isLong ? (cp - entry) * size : (entry - cp) * size;
+        currentProfitStr = `<span class="${cpPnl >= 0 ? 'text-green' : 'text-red'}">${cpPnl >= 0 ? '+' : ''}${cpPnl.toFixed(2)}</span>`;
+      }
+    } else if (t.exit_price != null) {
+      const exitP = Number(t.exit_price);
+      const cpPnl = isLong ? (exitP - entry) * size : (entry - exitP) * size;
+      currentProfitStr = `<span class="${cpPnl >= 0 ? 'text-green' : 'text-red'}">${cpPnl >= 0 ? '+' : ''}${cpPnl.toFixed(2)}</span>`;
+    }
+
+    const actionCell = t.status === 'OPEN'
+      ? `<button class="btn btn--danger btn--small" onclick="closeTrade(${t.id}, '${t.symbol}')">Close</button>`
+      : '–';
+
     tbody.innerHTML += `
       <tr>
         <td>${t.id}</td>
         <td><strong>${t.symbol}</strong></td>
-        <td class="${dirCls}"><strong>${t.direction}</strong></td>
+        <td><strong>${t.direction}</strong></td>
         <td>${formatPrice(t.entry_price)}</td>
         <td>${t.exit_price ? formatPrice(t.exit_price) : '–'}</td>
         <td>${t.size}</td>
         <td>$${value.toFixed(2)}</td>
-        <td class="text-red">${formatPrice(t.sl_price)}</td>
-        <td class="text-green">${formatPrice(t.tp_price)}</td>
+        <td>${formatPrice(t.sl_price)}</td>
+        <td>${formatPrice(t.tp_price)}</td>
         <td>${slLossStr}</td>
         <td>${tpProfitStr}</td>
+        <td>${currentProfitStr}</td>
         <td>${pnlStr}</td>
         <td>${statusBadge(t.status)}</td>
         <td>${fmtTs(t.opened_at)}</td>
+        <td>${actionCell}</td>
       </tr>`;
   });
+}
+
+async function closeTrade(tradeId, symbol) {
+  if (!confirm(`Close trade #${tradeId} (${symbol}) at current market price?`)) return;
+  try {
+    const res = await fetch(`${API}/trades/${tradeId}/close`, { method: 'POST' });
+    const data = await res.json();
+    if (data.ok) {
+      await refreshTradeHistory();
+    } else {
+      alert(`Failed to close trade: ${data.message}`);
+    }
+  } catch (e) {
+    alert(`Error closing trade: ${e.message}`);
+  }
 }
 
 // ── Activity log (common) ─────────────────────────────────────────────────
