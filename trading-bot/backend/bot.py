@@ -156,6 +156,11 @@ class TradingBot:
                 if raw_price is not None:
                     price = float(raw_price)
                     db.update_bot_status(symbol=self.symbol, last_price=price)
+                    # Keep paper equity in sync with the live price so the dashboard
+                    # shows the correct unrealised PnL between candle ticks.
+                    if self.paper_trading:
+                        equity = self._paper_equity(current_price=price)
+                        db.update_bot_status(symbol=self.symbol, equity=equity)
             except Exception as exc:  # noqa: BLE001
                 db.log_event(f"Price sync error ({self.symbol}): {exc}", level="WARNING")
 
@@ -196,7 +201,7 @@ class TradingBot:
 
         # ── Account equity ───────────────────────────────────────────────────
         if self.paper_trading:
-            equity = self._paper_equity()
+            equity = self._paper_equity(current_price=last_price)
         else:
             try:
                 balance_data = self._call_with_retries(
@@ -546,11 +551,24 @@ class TradingBot:
                 level="WARNING",
             )
 
-    def _paper_equity(self) -> float:
-        """Simulated equity for paper mode: start_equity + closed PnL for this symbol."""
+    def _paper_equity(self, current_price: float | None = None) -> float:
+        """Simulated equity for paper mode: start_equity + closed PnL + unrealised PnL.
+
+        Unrealised PnL is included when *current_price* is provided so the equity
+        shown on the dashboard moves with the market while a position is open.
+        """
         stats = db.get_trade_stats(symbol=self.symbol)
-        total_pnl = float(stats.get("total_pnl") or 0)
-        return float(config.PAPER_START_EQUITY) + total_pnl
+        closed_pnl = float(stats.get("total_pnl") or 0)
+        unrealised_pnl = 0.0
+        if current_price is not None:
+            for trade in db.get_open_trades(symbol=self.symbol):
+                entry = float(trade["entry_price"])
+                size  = float(trade["size"])
+                if trade["direction"] == Signal.LONG:
+                    unrealised_pnl += (current_price - entry) * size
+                else:
+                    unrealised_pnl += (entry - current_price) * size
+        return float(config.PAPER_START_EQUITY) + closed_pnl + unrealised_pnl
 
 
 # ── Utility functions ─────────────────────────────────────────────────────────
