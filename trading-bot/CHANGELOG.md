@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.3.2
+- Fix paper trading equity stuck at initial value — equity now reflects unrealised PnL from open positions in real time (updated every 5 minutes via price sync and at every candle tick)
+
 ## 1.3.1
 - Fix manual close button in paper trading mode — was incorrectly calling the exchange instead of skipping it
 - Fix Live Symbol Status collapse button not responding in Home Assistant ingress environment
