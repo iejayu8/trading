@@ -1162,3 +1162,165 @@ class TestCollapseButtonWiring:
         assert "btn-collapse-chart" in js
         assert "addEventListener" in js
 
+
+# ── POST /api/database/reset ──────────────────────────────────────────────────
+
+class TestDatabaseReset:
+    """Verify that POST /api/database/reset wipes all data and refreshes the UI."""
+
+    def test_reset_returns_ok_true(self, app_client):
+        resp = app_client.post("/api/database/reset")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["ok"] is True
+
+    def test_reset_clears_all_trades(self, app_client):
+        for _ in range(3):
+            tid = database.open_trade("BTC-USDT", "LONG", 40000.0, 0.001,
+                                      39000.0, 41600.0, 5)
+            database.close_trade(tid, 41600.0, 5.0)
+
+        app_client.post("/api/database/reset")
+
+        data = app_client.get("/api/trades").get_json()
+        assert data == []
+
+    def test_reset_clears_all_logs(self, app_client):
+        for i in range(5):
+            database.log_event(f"event {i}")
+
+        app_client.post("/api/database/reset")
+
+        # A single "Database reset" log entry is written after the wipe.
+        data = app_client.get("/api/logs").get_json()
+        assert len(data) == 1
+        assert "reset" in data[0]["message"].lower()
+
+    def test_reset_clears_stats(self, app_client):
+        tid = database.open_trade("BTC-USDT", "LONG", 40000.0, 0.001,
+                                  39000.0, 41600.0, 5)
+        database.close_trade(tid, 41600.0, 5.0)
+
+        app_client.post("/api/database/reset")
+
+        stats = app_client.get("/api/stats").get_json()
+        assert stats["total"] == 0
+        assert abs(float(stats["total_pnl"])) < 0.001
+
+    def test_reset_blocked_when_bot_running(self, app_client):
+        """Reset must be refused if any bot is currently running."""
+        import app as flask_app
+        mock = MagicMock()
+        mock.is_running = True
+        flask_app._bots["BTC-USDT"] = mock
+
+        resp = app_client.post("/api/database/reset")
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert data["ok"] is False
+        assert "stop" in data["message"].lower()
+
+    def test_reset_idempotent(self, app_client):
+        """Resetting an already-empty database must not error."""
+        resp1 = app_client.post("/api/database/reset")
+        assert resp1.status_code == 200
+        resp2 = app_client.post("/api/database/reset")
+        assert resp2.status_code == 200
+
+    def test_reset_button_in_html(self):
+        """index.html must contain the Reset Statistics button."""
+        from pathlib import Path
+        html = (Path(__file__).parent.parent / "frontend" / "index.html").read_text(encoding="utf-8")
+        assert "btn-reset-db" in html
+        assert "resetDatabase" in html or "Reset Statistics" in html
+
+    def test_reset_function_in_app_js(self):
+        """app.js must define the resetDatabase function."""
+        from pathlib import Path
+        js = (Path(__file__).parent.parent / "frontend" / "app.js").read_text(encoding="utf-8")
+        assert "function resetDatabase(" in js
+        assert "database/reset" in js
+
+
+# ── PnL formula correctness ───────────────────────────────────────────────────
+
+class TestPnlFormula:
+    """Verify that manual-close PnL equals (exit − entry) × size for both
+    directions, consistent with the bot's internal _calc_pnl helper."""
+
+    def test_long_pnl_matches_price_diff_times_size(self, app_client):
+        """LONG: pnl = (exit - entry) * size."""
+        entry, exit_price, size = 40000.0, 41600.0, 0.01
+        expected_pnl = round((exit_price - entry) * size, 4)  # 16.0
+
+        database.update_bot_status(symbol="BTC-USDT", last_price=exit_price)
+        tid = database.open_trade("BTC-USDT", "LONG", entry, size, 39000.0, 41600.0, 5)
+
+        with patch("config.TRADING_MODE", "papertrading"):
+            data = app_client.post(f"/api/trades/{tid}/close").get_json()
+
+        assert data["ok"] is True
+        assert abs(data["pnl"] - expected_pnl) < 1e-4, (
+            f"LONG PnL {data['pnl']} does not match expected {expected_pnl}"
+        )
+
+    def test_short_pnl_matches_price_diff_times_size(self, app_client):
+        """SHORT: pnl = (entry - exit) * size (positive when price falls)."""
+        entry, exit_price, size = 40000.0, 39000.0, 0.01
+        expected_pnl = round((entry - exit_price) * size, 4)  # 10.0
+
+        database.update_bot_status(symbol="BTC-USDT", last_price=exit_price)
+        tid = database.open_trade("BTC-USDT", "SHORT", entry, size, 41000.0, 39000.0, 5)
+
+        with patch("config.TRADING_MODE", "papertrading"):
+            data = app_client.post(f"/api/trades/{tid}/close").get_json()
+
+        assert data["ok"] is True
+        assert abs(data["pnl"] - expected_pnl) < 1e-4, (
+            f"SHORT PnL {data['pnl']} does not match expected {expected_pnl}"
+        )
+
+    def test_short_loss_pnl_is_negative(self, app_client):
+        """SHORT loss: price rises above entry → negative PnL."""
+        entry, exit_price, size = 40000.0, 41000.0, 0.01
+        expected_pnl = round((entry - exit_price) * size, 4)  # -10.0
+
+        database.update_bot_status(symbol="BTC-USDT", last_price=exit_price)
+        tid = database.open_trade("BTC-USDT", "SHORT", entry, size, 41000.0, 38000.0, 5)
+
+        with patch("config.TRADING_MODE", "papertrading"):
+            data = app_client.post(f"/api/trades/{tid}/close").get_json()
+
+        assert data["ok"] is True
+        assert data["pnl"] < 0, "SHORT loss must yield negative PnL"
+        assert abs(data["pnl"] - expected_pnl) < 1e-4
+
+    def test_equity_matches_paper_start_plus_pnl_long(self, app_client):
+        """After closing a LONG trade equity equals PAPER_START_EQUITY + PnL."""
+        import config
+        entry, exit_price, size = 40000.0, 41600.0, 0.01
+
+        database.update_bot_status(symbol="BTC-USDT", last_price=exit_price)
+        tid = database.open_trade("BTC-USDT", "LONG", entry, size, 39000.0, 41600.0, 5)
+
+        with patch("config.TRADING_MODE", "papertrading"):
+            r = app_client.post(f"/api/trades/{tid}/close").get_json()
+
+        status = app_client.get("/api/status?symbol=BTC-USDT").get_json()
+        expected_equity = config.PAPER_START_EQUITY + r["pnl"]
+        assert abs(float(status["equity"]) - expected_equity) < 1e-4
+
+    def test_equity_matches_paper_start_plus_pnl_short(self, app_client):
+        """After closing a SHORT trade equity equals PAPER_START_EQUITY + PnL."""
+        import config
+        entry, exit_price, size = 40000.0, 39000.0, 0.01
+
+        database.update_bot_status(symbol="BTC-USDT", last_price=exit_price)
+        tid = database.open_trade("BTC-USDT", "SHORT", entry, size, 41000.0, 38000.0, 5)
+
+        with patch("config.TRADING_MODE", "papertrading"):
+            r = app_client.post(f"/api/trades/{tid}/close").get_json()
+
+        status = app_client.get("/api/status?symbol=BTC-USDT").get_json()
+        expected_equity = config.PAPER_START_EQUITY + r["pnl"]
+        assert abs(float(status["equity"]) - expected_equity) < 1e-4

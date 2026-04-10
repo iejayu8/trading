@@ -132,3 +132,28 @@ class TestDatabase:
         """Missing symbol should fail fast to surface migration issues."""
         with pytest.raises(TypeError):
             database.get_bot_status()  # type: ignore[call-arg]
+
+    def test_reset_database_clears_all_tables(self):
+        """reset_database() removes every row from trades, bot_logs, bot_status."""
+        # Seed all three tables.
+        tid = database.open_trade("BTC-USDT", "LONG", 40000.0, 0.001,
+                                  39000.0, 41600.0, 5)
+        database.close_trade(tid, 41600.0, 5.0)
+        database.log_event("before reset")
+        database.update_bot_status(symbol="BTC-USDT", running=1, last_signal="LONG")
+
+        database.reset_database()
+
+        assert database.get_trade_history() == []
+        assert database.get_logs() == []
+        assert database.get_bot_status("BTC-USDT")["running"] == 0  # defaults after re-insert
+
+    def test_reset_database_allows_fresh_data_afterwards(self):
+        """After a reset the DB accepts new rows normally."""
+        database.log_event("pre-reset")
+        database.reset_database()
+        database.log_event("post-reset")
+
+        logs = database.get_logs()
+        assert len(logs) == 1
+        assert logs[0]["message"] == "post-reset"

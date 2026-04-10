@@ -135,7 +135,10 @@
     <section class="panel">
       <div class="panel__head">
         <h2 class="panel__title">Activity Log <span class="tag tag--info">All Symbols</span></h2>
-        <button id="btn-clear-logs" class="btn btn--secondary" onclick="clearLogs()">Clear Log</button>
+        <div class="panel__head-actions">
+          <button id="btn-clear-logs" class="btn btn--secondary" onclick="clearLogs()">Clear Log</button>
+          <button id="btn-reset-db" class="btn btn--danger" onclick="resetDatabase()">Reset Statistics</button>
+        </div>
       </div>
       <div id="log-container" class="log-container"></div>
     </section>
