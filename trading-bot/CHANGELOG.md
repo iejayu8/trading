@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.3.3
+- Fix equity stuck at $1000 after manual trade close — `POST /api/trades/<id>/close` now immediately recalculates and persists equity in `bot_status`, matching the behaviour of the bot's internal close path
+
 ## 1.3.2
 - Fix paper trading equity stuck at initial value — equity now reflects unrealised PnL from open positions in real time (updated every 5 minutes via price sync and at every candle tick)
 
