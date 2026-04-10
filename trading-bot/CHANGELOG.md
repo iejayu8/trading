@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.4.0
+## 1.4.1
 - Add **Reset Statistics** button to the dashboard that deletes all trade history, activity logs and bot status — compatible with both the standalone app and the Home Assistant add-on
 - Fix equity/PnL mismatch when closing trades: the manual-close PnL formula now uses `(exit − entry) × size` directly, consistent with the bot's internal `_calc_pnl` helper and eliminating the intermediate floating-point division that could produce tiny rounding discrepancies
 
