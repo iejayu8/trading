@@ -568,6 +568,16 @@ async function clearLogs() {
   } catch (e) { alert('Could not reach API server: ' + e.message); }
 }
 
+async function resetDatabase() {
+  if (!confirm('Reset all statistics?\n\nThis will permanently delete all trade history, activity logs, and bot status data. This action cannot be undone.\n\nMake sure all bots are stopped before resetting.')) return;
+  try {
+    const r = await fetch(`${API}/database/reset`, { method: 'POST' });
+    const data = await r.json();
+    if (!r.ok || !data.ok) { alert(data.message || 'Could not reset database'); return; }
+    await refreshAll();
+  } catch (e) { alert('Could not reach API server: ' + e.message); }
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function formatPrice(value) {

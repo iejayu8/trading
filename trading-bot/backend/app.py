@@ -252,6 +252,23 @@ def api_logs_clear():
     return jsonify({"ok": True, "message": "Activity log cleared"})
 
 
+@app.post("/api/database/reset")
+def api_database_reset():
+    """Wipe all trade history, logs and bot status so statistics start fresh.
+
+    The bots must be stopped before calling this endpoint so in-flight bot
+    threads cannot race against the DELETE statements.
+    """
+    for sym in config.SUPPORTED_SYMBOLS:
+        bot = _bots.get(sym)
+        if bot and bot.is_running:
+            return jsonify({"ok": False, "message": "Stop all bots before resetting the database"}), 400
+
+    db.reset_database()
+    db.log_event("Database reset – all statistics cleared")
+    return jsonify({"ok": True, "message": "Database reset successfully"})
+
+
 # ── Bot control ───────────────────────────────────────────────────────────────
 
 @app.post("/api/bot/start")
