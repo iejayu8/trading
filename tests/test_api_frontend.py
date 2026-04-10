@@ -1012,6 +1012,99 @@ class TestEquityDisplay:
         assert abs(float(all_status["ETH-USDT"]["equity"]) - 500.0) < 0.01
 
 
+# ── POST /api/trades/<id>/close – equity refresh ─────────────────────────────
+
+class TestManualCloseTrade:
+    """Verify that manually closing a trade via the API immediately updates
+    bot_status.equity, matching the behaviour of the bot's internal close path.
+
+    Regression for: equity stuck at $1000 after trades, even though PnL is
+    updated — caused by api_close_trade not calling equity refresh.
+    """
+
+    def test_equity_updated_after_manual_close_paper(self, app_client):
+        """Paper trading: equity = PAPER_START_EQUITY + total_closed_pnl after
+        a manual close, without waiting for the next background tick."""
+        import config
+
+        # Seed last_price so the endpoint can calculate the close price.
+        database.update_bot_status(symbol="BTC-USDT", last_price=41000.0)
+
+        # Open a paper LONG trade.
+        tid = database.open_trade(
+            symbol="BTC-USDT",
+            direction="LONG",
+            entry_price=40000.0,
+            size=0.01,
+            sl_price=39000.0,
+            tp_price=42000.0,
+            leverage=5,
+        )
+
+        with patch("config.TRADING_MODE", "papertrading"):
+            resp = app_client.post(f"/api/trades/{tid}/close")
+
+        assert resp.status_code == 200
+        payload = resp.get_json()
+        assert payload["ok"] is True
+
+        # The pnl for a LONG closed at 41000 from entry 40000, size 0.01:
+        # pnl = (41000 - 40000) / 40000 * 40000 * 0.01 = 1000 * 0.01 = 10.0
+        assert abs(payload["pnl"] - 10.0) < 0.01
+
+        # Equity must be updated in bot_status immediately (not deferred to bg thread).
+        status = app_client.get("/api/status?symbol=BTC-USDT").get_json()
+        expected_equity = config.PAPER_START_EQUITY + payload["pnl"]
+        assert status["equity"] is not None, "equity must not be null after manual close"
+        assert abs(float(status["equity"]) - expected_equity) < 0.01, (
+            f"Expected equity {expected_equity}, got {status['equity']}"
+        )
+
+    def test_equity_reflects_cumulative_pnl_across_multiple_manual_closes(self, app_client):
+        """Each manual close adds its PnL; equity accumulates correctly."""
+        import config
+
+        database.update_bot_status(symbol="BTC-USDT", last_price=41000.0)
+
+        # First trade: profit.
+        tid1 = database.open_trade("BTC-USDT", "LONG", 40000.0, 0.01, 39000.0, 42000.0, 5)
+        with patch("config.TRADING_MODE", "papertrading"):
+            r1 = app_client.post(f"/api/trades/{tid1}/close").get_json()
+        pnl1 = r1["pnl"]
+
+        # Second trade: loss (SHORT from 41000, closes at 41000 → 0 PnL, but let's
+        # open at a price that produces a loss when closed at last_price=41000).
+        database.update_bot_status(symbol="BTC-USDT", last_price=39000.0)
+        tid2 = database.open_trade("BTC-USDT", "SHORT", 40000.0, 0.01, 41000.0, 38000.0, 5)
+        with patch("config.TRADING_MODE", "papertrading"):
+            r2 = app_client.post(f"/api/trades/{tid2}/close").get_json()
+        pnl2 = r2["pnl"]
+
+        status = app_client.get("/api/status?symbol=BTC-USDT").get_json()
+        expected = config.PAPER_START_EQUITY + pnl1 + pnl2
+        assert abs(float(status["equity"]) - expected) < 0.01, (
+            f"Expected cumulative equity {expected}, got {status['equity']}"
+        )
+
+    def test_manual_close_unknown_trade_returns_404(self, app_client):
+        resp = app_client.post("/api/trades/99999/close")
+        assert resp.status_code == 404
+
+    def test_manual_close_already_closed_trade_returns_400(self, app_client):
+        database.update_bot_status(symbol="BTC-USDT", last_price=41000.0)
+        tid = database.open_trade("BTC-USDT", "LONG", 40000.0, 0.01, 39000.0, 42000.0, 5)
+        database.close_trade(tid, 41000.0, 10.0)
+        resp = app_client.post(f"/api/trades/{tid}/close")
+        assert resp.status_code == 400
+
+    def test_manual_close_without_price_returns_502(self, app_client):
+        """If last_price is missing (bot never started), close must fail gracefully."""
+        tid = database.open_trade("BTC-USDT", "LONG", 40000.0, 0.01, 39000.0, 42000.0, 5)
+        # Do NOT seed last_price — simulate a never-started bot.
+        resp = app_client.post(f"/api/trades/{tid}/close")
+        assert resp.status_code == 502
+
+
 # ── Frontend HTML – collapse button wiring ────────────────────────────────────
 
 class TestCollapseButtonWiring:

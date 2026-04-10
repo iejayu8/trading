@@ -210,6 +210,24 @@ def api_close_trade(trade_id: int):
     db.close_trade(trade_id, current_price, pnl)
     db.log_event(f"Trade {trade_id} manually closed @ {current_price:.2f}  PnL={pnl:.4f} USDT")
 
+    # Refresh equity immediately so the dashboard reflects the new balance
+    # without waiting for the next background tick (up to 15 min away).
+    # Mirrors what TradingBot._refresh_equity_after_close() does internally.
+    try:
+        if config.TRADING_MODE == "papertrading":
+            stats = db.get_trade_stats(symbol)
+            closed_pnl = float(stats.get("total_pnl") or 0)
+            equity = config.PAPER_START_EQUITY + closed_pnl
+            db.update_bot_status(symbol=symbol, equity=equity)
+        else:
+            # For live trading, delegate to the running bot if available so
+            # it can use its authenticated client to fetch the real balance.
+            bot = _bots.get(symbol)
+            if bot and bot.is_running:
+                bot._refresh_equity_after_close()
+    except Exception:
+        pass  # Non-fatal: the background tick will correct equity on its next run.
+
     return jsonify({"ok": True, "message": f"Trade {trade_id} closed", "pnl": pnl, "exit_price": current_price})
 
 
