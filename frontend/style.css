@@ -170,6 +170,12 @@ main {
   margin-bottom: 0;
 }
 
+.panel__head-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .btn--secondary {
   background: var(--surface-2);
   color: var(--text);

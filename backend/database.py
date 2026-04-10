@@ -334,3 +334,24 @@ def reset_running_flags() -> None:
             (now,),
         )
 
+
+def reset_database() -> None:
+    """Wipe all trade history, logs, and bot status rows.
+
+    Deletes every row from the ``trades``, ``bot_logs``, and ``bot_status``
+    tables, then re-initialises them so the schema remains intact.  This lets
+    the user reset all statistics without restarting the server.
+
+    Compatible with both the standalone desktop app (DB_PATH resolved from env
+    or default location next to the backend) and the Home Assistant add-on
+    (DB_PATH set via the ``TRADING_DB_PATH`` environment variable).
+    """
+    with _db() as conn:
+        conn.executescript(
+            """
+            DELETE FROM trades;
+            DELETE FROM bot_logs;
+            DELETE FROM bot_status;
+            """
+        )
+
