@@ -18,6 +18,7 @@ POST /api/bot/stop             – stop all symbol bots
 POST /api/bot/stop?symbol=X    – stop single symbol bot
 GET  /api/config               – current strategy parameters (read-only)
 GET  /api/market/context       – live chart + indicators (?symbol=X)
+POST /api/database/reset       – wipe all trades, logs and bot status (resets statistics)
 """
 
 from __future__ import annotations
@@ -203,9 +204,9 @@ def api_close_trade(trade_id: int):
             return jsonify({"ok": False, "message": f"Exchange error: {exc}"}), 502
 
     if direction == "LONG":
-        pnl = round((current_price - entry) / entry * entry * size, 4)
+        pnl = round((current_price - entry) * size, 4)
     else:
-        pnl = round((entry - current_price) / entry * entry * size, 4)
+        pnl = round((entry - current_price) * size, 4)
 
     db.close_trade(trade_id, current_price, pnl)
     db.log_event(f"Trade {trade_id} manually closed @ {current_price:.2f}  PnL={pnl:.4f} USDT")
@@ -257,8 +258,12 @@ def api_database_reset():
     """Wipe all trade history, logs and bot status so statistics start fresh.
 
     The bots must be stopped before calling this endpoint so in-flight bot
-    threads cannot race against the DELETE statements.
+    threads cannot race against the DELETE statements.  This works for both
+    the standalone desktop app and the Home Assistant add-on because the
+    database path is resolved from ``TRADING_DB_PATH`` (or the default
+    location) at import time.
     """
+    # Refuse to reset while any bot is actively running.
     for sym in config.SUPPORTED_SYMBOLS:
         bot = _bots.get(sym)
         if bot and bot.is_running:

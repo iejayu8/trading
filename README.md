@@ -1,5 +1,23 @@
 # trading
 
+## Developer Setup
+
+After cloning, run the one-time setup script to activate the project's git hooks:
+
+```sh
+sh setup-hooks.sh
+```
+
+This sets `core.hooksPath = .githooks` so the **pre-commit hook** runs automatically on every `git commit`.
+
+### What the pre-commit hook does
+
+`backend/` and `frontend/` are the source-of-truth.  
+On every commit the hook mirrors both directories into `trading-bot/backend/` and `trading-bot/frontend/` (the Home Assistant add-on copy) so the two are always in sync.  
+SQLite database files (`*.db`, `*.db-shm`, `*.db-wal`) are excluded from the mirror.
+
+---
+
 ## Backend Import Policy
 
 Backend modules prefer package-relative imports (for example, `from . import config`).
