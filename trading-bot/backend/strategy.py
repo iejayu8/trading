@@ -173,22 +173,45 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-_last_signal_bar: dict[str, int] = {}
+_last_signal_ts: dict[str, pd.Timestamp] = {}
 # Keys are trading symbols (e.g. "BTC-USDT", "ETH-USDT").
-# A missing key means the symbol has never signalled → treated as -SIGNAL_COOLDOWN.
+# Values are the UTC timestamp of the last candle that generated a signal.
+# A missing key means the symbol has never signalled.
+#
+# NOTE: Previously this stored a positional bar *index* (len(df) - 1).  That
+# broke in production because the bot always fetches a fixed number of candles
+# (limit=200), so len(df) - 1 was always 199.  Once a signal fired at index
+# 199, every subsequent tick computed bars_since = 199 - 199 = 0, which is
+# permanently less than the cooldown threshold.  Tracking timestamps instead
+# of indices is robust to any fetch-window size.
+
+_CANDLE_SECONDS = 15 * 60  # 15-minute candles = 900 s
 
 
-def _get_last_bar(symbol: str) -> int:
-    """Return the bar index of the last signal for *symbol*."""
-    return _last_signal_bar.get(symbol, -SIGNAL_COOLDOWN)
+def _get_last_signal_ts(symbol: str) -> pd.Timestamp | None:
+    """Return the timestamp of the last signal candle for *symbol*, or None."""
+    return _last_signal_ts.get(symbol)
+
+
+def _bars_since_last_signal(symbol: str, current_ts: pd.Timestamp) -> int:
+    """Return elapsed bars since the last signal for *symbol*.
+
+    Returns a very large number when the symbol has never signalled so that the
+    cooldown check always passes (i.e. the symbol is immediately eligible).
+    """
+    last = _get_last_signal_ts(symbol)
+    if last is None:
+        return SIGNAL_COOLDOWN + 1  # guaranteed to be ≥ any cooldown
+    elapsed_seconds = (current_ts - last).total_seconds()
+    return int(elapsed_seconds // _CANDLE_SECONDS)
 
 
 def reset_signal_state(symbol: str | None = None) -> None:
     """Reset cooldown state for *symbol* (or all symbols when None)."""
     if symbol is None:
-        _last_signal_bar.clear()
+        _last_signal_ts.clear()
     else:
-        _last_signal_bar.pop(symbol, None)
+        _last_signal_ts.pop(symbol, None)
 
 
 def generate_signal(df: pd.DataFrame, symbol: str = "BTC-USDT") -> str:
@@ -204,8 +227,8 @@ def generate_signal(df: pd.DataFrame, symbol: str = "BTC-USDT") -> str:
     cooldown   = sym_params.get("signal_cooldown", SIGNAL_COOLDOWN)
     adx_min    = sym_params.get("adx_min", ADX_MIN)
 
-    current_bar = len(df) - 1
-    if current_bar - _get_last_bar(symbol) < cooldown:
+    current_ts = df.index[-1]
+    if _bars_since_last_signal(symbol, current_ts) < cooldown:
         return Signal.NONE
 
     last = df.iloc[-1]
@@ -223,12 +246,12 @@ def generate_signal(df: pd.DataFrame, symbol: str = "BTC-USDT") -> str:
 
     # ── Long: fresh pullback + recovery within uptrend ─────────────────────
     if all(checks["long_checks"].values()):
-        _last_signal_bar[symbol] = current_bar
+        _last_signal_ts[symbol] = current_ts
         return Signal.LONG
 
     # ── Short: fresh rally + rejection within downtrend ────────────────────
     if all(checks["short_checks"].values()):
-        _last_signal_bar[symbol] = current_bar
+        _last_signal_ts[symbol] = current_ts
         return Signal.SHORT
 
     return Signal.NONE
@@ -241,7 +264,6 @@ def get_signal_diagnostics(df: pd.DataFrame, symbol: str = "BTC-USDT") -> dict:
     Returns a dict with readiness flags and a human-readable waiting reason.
     """
     min_bars = MIN_BARS_REQUIRED
-    current_bar = len(df) - 1
 
     sym_params = config.get_symbol_params(symbol)
     cooldown   = sym_params.get("signal_cooldown", SIGNAL_COOLDOWN)
@@ -257,7 +279,8 @@ def get_signal_diagnostics(df: pd.DataFrame, symbol: str = "BTC-USDT") -> dict:
         out["waiting_for"] = f"Collecting candles ({len(df)}/{min_bars})"
         return out
 
-    bars_since = current_bar - _get_last_bar(symbol)
+    current_ts = df.index[-1]
+    bars_since = _bars_since_last_signal(symbol, current_ts)
     cooldown_left = cooldown - bars_since
     if cooldown_left > 0:
         out["signal_hint"] = "COOLDOWN"
