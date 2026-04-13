@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.0
+- Add **Copy Trading** mode — mirror a BloFin lead trader's open positions instead of using the built-in strategy
+- New toggle in the dashboard header switches between *Custom Strategy* and *Copy Trading*; entering a Trader ID / Unique Name and clicking **Apply** activates mirroring
+- When copy trading is active the **Mode** KPI card shows **COPY TRADING** in purple
+- Copy trading works in both paper and real trading modes; position sizing always uses your own risk parameters (`RISK_PER_TRADE`), never the lead trader's contract size
+- New API endpoints: `GET /api/copytrading/config` and `POST /api/copytrading/config`
+- Settings are persisted in the database so they survive bot or add-on restarts
+- Environment-variable startup defaults: `COPY_TRADING_ENABLED` and `COPY_TRADING_TRADER_ID`
+
 ## 1.4.2
 - Fix **signal cooldown never expiring** in production — cooldown is now tracked by candle timestamp instead of positional DataFrame index; previously `len(df) - 1` was always 199 (fixed 200-candle fetch window), so a signal fired at index 199 permanently blocked all subsequent signals
 
