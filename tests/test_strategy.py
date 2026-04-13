@@ -15,7 +15,7 @@ import config
 from strategy import (
     ADX_MIN,
     Signal,
-    _last_signal_bar,
+    _last_signal_ts,
     SIGNAL_COOLDOWN,
     calculate_position_size,
     calculate_sl_tp,
@@ -218,8 +218,8 @@ class TestGenerateSignal:
         # Different symbol should remain independent and still be able to signal.
         assert generate_signal(window, symbol="ETH-USDT") == Signal.LONG
 
-        assert _last_signal_bar["BTC-USDT"] == trigger_idx
-        assert _last_signal_bar["ETH-USDT"] == trigger_idx
+        assert _last_signal_ts["BTC-USDT"] == df.index[trigger_idx]
+        assert _last_signal_ts["ETH-USDT"] == df.index[trigger_idx]
 
 
 # ── calculate_position_size ───────────────────────────────────────────────────
