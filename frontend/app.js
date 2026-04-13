@@ -22,6 +22,7 @@ let priceChart = null;
 let _activeParamSymbol = null;  // selected symbol in Strategy Parameters
 let _activeChartSymbol = null;  // selected symbol in Market Context
 let _symbols = [];               // list from /api/symbols
+let _copyTradingEnabled = false; // mirrors the DB copy trading toggle
 
 // ── Boot ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -175,6 +176,7 @@ async function refreshAll() {
     refreshSymbolChart(_activeChartSymbol),
     refreshCommonTradePanels(),
     refreshLogs(),
+    loadCopyTradingConfig(),
   ]);
 }
 
@@ -204,9 +206,10 @@ async function refreshBotStatus() {
   // Mode + equity from active symbol's status
   const activeStatus = allStatus[_activeParamSymbol] || {};
   const modeEl = document.getElementById('kpi-mode');
-  const mode = String(activeStatus.trading_mode || 'realtrading').toLowerCase();
-  modeEl.textContent = mode.toUpperCase();
-  modeEl.className = 'card__value ' + modeClass(mode);
+  const rawMode = String(activeStatus.trading_mode || 'realtrading').toLowerCase();
+  const displayMode = _copyTradingEnabled ? 'copytrading' : rawMode;
+  modeEl.textContent = displayMode.replace('copytrading', 'COPY TRADING').toUpperCase();
+  modeEl.className = 'card__value ' + modeClass(displayMode);
 
   let equity = activeStatus.equity != null ? activeStatus.equity : null;
   if (equity === null) {
@@ -578,6 +581,59 @@ async function resetDatabase() {
   } catch (e) { alert('Could not reach API server: ' + e.message); }
 }
 
+// ── Copy trading controls ──────────────────────────────────────────────────
+
+async function loadCopyTradingConfig() {
+  let cfg;
+  try { cfg = await fetchJSON(`${API}/copytrading/config`); } catch { return; }
+
+  _copyTradingEnabled = !!cfg.enabled;
+  const toggle = document.getElementById('copy-trading-toggle');
+  const inputWrap = document.getElementById('copy-trader-input-wrap');
+  const idInput = document.getElementById('copy-trader-id');
+  const statusEl = document.getElementById('copy-trading-status');
+
+  if (toggle) toggle.checked = _copyTradingEnabled;
+  if (inputWrap) inputWrap.classList.toggle('hidden', !_copyTradingEnabled);
+  if (idInput && cfg.trader_id) idInput.value = cfg.trader_id;
+  if (statusEl) {
+    if (_copyTradingEnabled && cfg.trader_id) {
+      statusEl.textContent = `Mirroring: ${cfg.trader_id}`;
+      statusEl.className = 'copy-trading-status text-purple';
+    } else if (_copyTradingEnabled) {
+      statusEl.textContent = 'Copy trading on – enter a trader ID';
+      statusEl.className = 'copy-trading-status text-gold';
+    } else {
+      statusEl.textContent = 'Custom strategy active';
+      statusEl.className = 'copy-trading-status';
+    }
+  }
+}
+
+function onCopyTradingToggle() {
+  const toggle = document.getElementById('copy-trading-toggle');
+  const inputWrap = document.getElementById('copy-trader-input-wrap');
+  if (inputWrap) inputWrap.classList.toggle('hidden', !toggle.checked);
+}
+
+async function saveCopyTradingConfig() {
+  const toggle = document.getElementById('copy-trading-toggle');
+  const idInput = document.getElementById('copy-trader-id');
+  const enabled = toggle ? toggle.checked : false;
+  const trader_id = idInput ? idInput.value.trim() : '';
+
+  try {
+    const r = await fetch(`${API}/copytrading/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled, trader_id }),
+    });
+    const data = await r.json();
+    if (!data.ok) { alert(`Copy trading config error: ${data.message}`); return; }
+    await refreshAll();
+  } catch (e) { alert(`Could not save copy trading config: ${e.message}`); }
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function formatPrice(value) {
@@ -600,6 +656,7 @@ function setupClass(hint) {
 function modeClass(mode) {
   if (mode === 'papertrading') return 'text-blue';
   if (mode === 'realtrading')  return 'text-green';
+  if (mode === 'copytrading')  return 'text-purple';
   return 'text-gold';
 }
 

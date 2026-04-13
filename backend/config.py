@@ -102,8 +102,6 @@ if TRADING_MARGIN_MODE not in {"cross", "isolated"}:
 
 if TRADING_MODE not in {"papertrading", "realtrading"}:
     TRADING_MODE = "realtrading"
-
-if LEVERAGE < 1:
     LEVERAGE = 1
 elif LEVERAGE > 125:
     LEVERAGE = 125
@@ -115,6 +113,18 @@ elif RISK_PER_TRADE > 1:
 
 if PAPER_START_EQUITY <= 0:
     PAPER_START_EQUITY = 1000.0
+
+# ── Copy trading defaults (overridable at runtime via /api/copytrading/config) ─
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name, "").strip().strip("\"'").lower()
+    if raw in {"1", "true", "yes"}:
+        return True
+    if raw in {"0", "false", "no"}:
+        return False
+    return default
+
+COPY_TRADING_ENABLED: bool = _env_bool("COPY_TRADING_ENABLED", False)
+COPY_TRADING_TRADER_ID: str = _env_str("COPY_TRADING_TRADER_ID", "")
 
 # Supported symbols (scalable)
 SUPPORTED_SYMBOLS: list[str] = [

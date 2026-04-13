@@ -181,3 +181,28 @@ class BloFinClient:
         path = "/api/v1/trade/orders-history"
         resp = self._get(path, {"instId": symbol, "limit": limit})
         return resp.get("data", [])
+
+    # ── Copy trading (public lead-trader endpoints) ───────────────────────────
+
+    def get_copy_trader_positions(self, trader_id: str) -> list[dict]:
+        """Fetch the lead trader's current open positions.
+
+        Returns a list of position dicts.  Each dict is expected to contain:
+          ``instId``   – instrument ID (e.g. "BTC-USDT")
+          ``side``     – "long" or "short"
+          ``pos``      – position size (may also appear as ``size`` or ``positions``)
+        """
+        path = "/api/v1/copytrading/lead-trader/current-order"
+        resp = self._get(path, {"uniqueName": trader_id})
+        return resp.get("data", []) or []
+
+    def get_copy_trader_order_history(self, trader_id: str, limit: int = 50) -> list[dict]:
+        """Fetch the lead trader's recent closed orders.
+
+        Useful for detecting newly opened/closed trades between polls.
+        Returns a list of order dicts with the same shape as
+        ``get_copy_trader_positions``.
+        """
+        path = "/api/v1/copytrading/lead-trader/order-history"
+        resp = self._get(path, {"uniqueName": trader_id, "limit": limit})
+        return resp.get("data", []) or []

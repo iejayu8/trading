@@ -19,6 +19,8 @@ POST /api/bot/stop?symbol=X    – stop single symbol bot
 GET  /api/config               – current strategy parameters (read-only)
 GET  /api/market/context       – live chart + indicators (?symbol=X)
 POST /api/database/reset       – wipe all trades, logs and bot status (resets statistics)
+GET  /api/copytrading/config   – read copy trading settings
+POST /api/copytrading/config   – update copy trading settings
 """
 
 from __future__ import annotations
@@ -458,6 +460,36 @@ def api_market_context():
             "target_band": target_band,
         }
     )
+
+
+# ── Copy trading configuration ────────────────────────────────────────────────
+
+@app.get("/api/copytrading/config")
+def api_copytrading_get():
+    """Return the current copy trading configuration."""
+    cfg = db.get_copy_trading_config()
+    return jsonify({"ok": True, "enabled": cfg["enabled"], "trader_id": cfg["trader_id"]})
+
+
+@app.post("/api/copytrading/config")
+def api_copytrading_set():
+    """Update copy trading settings.
+
+    Expects JSON body: ``{"enabled": true/false, "trader_id": "..."}``
+    When *enabled* is ``true``, *trader_id* must be a non-empty string.
+    """
+    body = request.get_json(silent=True) or {}
+    enabled = bool(body.get("enabled", False))
+    trader_id = str(body.get("trader_id", "") or "").strip()
+
+    if enabled and not trader_id:
+        return jsonify({"ok": False, "message": "trader_id is required when copy trading is enabled"}), 400
+
+    db.set_copy_trading_config(enabled=enabled, trader_id=trader_id)
+    db.log_event(
+        f"Copy trading {'ENABLED (trader: ' + trader_id + ')' if enabled else 'DISABLED'}"
+    )
+    return jsonify({"ok": True, "enabled": enabled, "trader_id": trader_id})
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
