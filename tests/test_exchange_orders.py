@@ -51,7 +51,8 @@ class TestPlaceOrder:
 
         assert result["code"] == "0"
         call_args = client._session.post.call_args
-        assert "/api/v1/trade/order" in call_args[0][0]
+        url = call_args[0][0]
+        assert url == f"{client.BASE_URL}/api/v1/trade/order"
 
         # Verify body contains required fields
         import json

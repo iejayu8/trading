@@ -39,7 +39,7 @@ def isolate_db():
 class TestUpdateBotStatusGuard:
     def test_unknown_column_raises_value_error(self):
         """Passing an unknown column to update_bot_status must raise ValueError."""
-        with pytest.raises(ValueError, match="Unknown bot_status column"):
+        with pytest.raises(ValueError, match="unknown_column"):
             db.update_bot_status("BTC-USDT", unknown_column=42)
 
     def test_multiple_unknown_columns_raises(self):
