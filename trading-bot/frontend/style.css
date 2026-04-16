@@ -207,10 +207,14 @@ main {
 .table-scroll { overflow-x: auto; }
 
 /* ── Colour helpers ───────────────────────────────────────────────────────── */
-.text-green { color: var(--green); }
-.text-red   { color: var(--red);   }
-.text-blue  { color: var(--blue);  }
-.text-gold  { color: var(--accent);}
+.text-green  { color: var(--green); }
+.text-red    { color: var(--red);   }
+.text-blue   { color: var(--blue);  }
+.text-gold   { color: var(--accent);}
+.text-purple { color: #a371f7; }
+
+/* ── Utility ──────────────────────────────────────────────────────────────── */
+.hidden { display: none !important; }
 
 /* ── Log ──────────────────────────────────────────────────────────────────── */
 .log-container {
@@ -504,3 +508,90 @@ main {
   margin-top: 16px;
 }
 
+/* ── Buttons (additional) ────────────────────────────────────────────────── */
+.btn--primary { background: var(--blue); color: #fff; }
+
+/* ── Mode selector bar ────────────────────────────────────────────────────── */
+.mode-selector-bar {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 8px 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.mode-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.mode-buttons {
+  display: flex;
+  gap: 0;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.mode-btn {
+  background: var(--surface-2);
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font);
+  padding: 6px 18px;
+  transition: color 0.15s, background 0.15s;
+  border-right: 1px solid var(--border);
+}
+
+.mode-btn:last-child {
+  border-right: none;
+}
+
+.mode-btn:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.mode-btn--active {
+  color: var(--accent);
+  background: rgba(240, 185, 11, 0.10);
+}
+
+.mode-btn--active.mode-btn--copy {
+  color: #a371f7;
+  background: rgba(163, 113, 247, 0.10);
+}
+
+.mode-btn--active.mode-btn--paper {
+  color: var(--blue);
+  background: rgba(56, 139, 253, 0.10);
+}
+
+.copy-trader-input {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 13px;
+  padding: 4px 10px;
+  width: 220px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.copy-trader-input:focus {
+  border-color: #a371f7;
+}
+
+.copy-trading-status {
+  font-size: 12px;
+  color: var(--text-muted);
+}

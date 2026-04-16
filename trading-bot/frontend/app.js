@@ -22,6 +22,8 @@ let priceChart = null;
 let _activeParamSymbol = null;  // selected symbol in Strategy Parameters
 let _activeChartSymbol = null;  // selected symbol in Market Context
 let _symbols = [];               // list from /api/symbols
+let _copyTradingEnabled = false; // mirrors the DB copy trading toggle
+let _tradingMode = 'realtrading'; // mirrors config.TRADING_MODE
 
 // ── Boot ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -175,6 +177,8 @@ async function refreshAll() {
     refreshSymbolChart(_activeChartSymbol),
     refreshCommonTradePanels(),
     refreshLogs(),
+    loadTradingMode(),
+    loadCopyTradingConfig(),
   ]);
 }
 
@@ -204,9 +208,10 @@ async function refreshBotStatus() {
   // Mode + equity from active symbol's status
   const activeStatus = allStatus[_activeParamSymbol] || {};
   const modeEl = document.getElementById('kpi-mode');
-  const mode = String(activeStatus.trading_mode || 'realtrading').toLowerCase();
-  modeEl.textContent = mode.toUpperCase();
-  modeEl.className = 'card__value ' + modeClass(mode);
+  const rawMode = String(activeStatus.trading_mode || 'realtrading').toLowerCase();
+  const displayMode = _copyTradingEnabled ? 'copytrading' : rawMode;
+  modeEl.textContent = displayMode.replace('copytrading', 'COPY TRADING').toUpperCase();
+  modeEl.className = 'card__value ' + modeClass(displayMode);
 
   let equity = activeStatus.equity != null ? activeStatus.equity : null;
   if (equity === null) {
@@ -578,6 +583,124 @@ async function resetDatabase() {
   } catch (e) { alert('Could not reach API server: ' + e.message); }
 }
 
+// ── Trading mode (paper / real) controls ────────────────────────────────────
+
+async function loadTradingMode() {
+  let data;
+  try { data = await fetchJSON(`${API}/trading/mode`); } catch { return; }
+
+  _tradingMode = data.mode || 'realtrading';
+  const btnPaper = document.getElementById('mode-btn-paper');
+  const btnReal  = document.getElementById('mode-btn-real');
+
+  if (btnPaper && btnReal) {
+    btnPaper.classList.toggle('mode-btn--active', _tradingMode === 'papertrading');
+    btnPaper.classList.toggle('mode-btn--paper', _tradingMode === 'papertrading');
+    btnReal.classList.toggle('mode-btn--active', _tradingMode === 'realtrading');
+  }
+}
+
+async function switchTradingMode(mode) {
+  if (mode === _tradingMode) return;
+
+  const label = mode === 'papertrading' ? 'Paper Trading' : 'Real Trading';
+  if (!confirm(`Switch to ${label}?\n\nAll bots will be stopped. You will need to restart them manually.`)) return;
+
+  // Stop bots first
+  try {
+    await fetch(`${API}/bot/stop`, { method: 'POST' });
+  } catch { /* bots may already be stopped */ }
+
+  try {
+    const r = await fetch(`${API}/trading/mode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    });
+    const data = await r.json();
+    if (!data.ok) { alert(`Error switching mode: ${data.message}`); return; }
+  } catch (e) { alert(`Could not switch trading mode: ${e.message}`); return; }
+
+  await refreshAll();
+}
+
+// ── Mode selector & copy trading controls ──────────────────────────────────
+
+async function loadCopyTradingConfig() {
+  let cfg;
+  try { cfg = await fetchJSON(`${API}/copytrading/config`); } catch { return; }
+
+  _copyTradingEnabled = !!cfg.enabled;
+  const inputWrap = document.getElementById('copy-trader-input-wrap');
+  const idInput = document.getElementById('copy-trader-id');
+  const statusEl = document.getElementById('copy-trading-status');
+  const btnStrategy = document.getElementById('mode-btn-strategy');
+  const btnCopy = document.getElementById('mode-btn-copy');
+
+  // Sync toggle buttons
+  if (btnStrategy && btnCopy) {
+    btnStrategy.classList.toggle('mode-btn--active', !_copyTradingEnabled);
+    btnCopy.classList.toggle('mode-btn--active', _copyTradingEnabled);
+    btnCopy.classList.toggle('mode-btn--copy', _copyTradingEnabled);
+  }
+
+  if (inputWrap) inputWrap.classList.toggle('hidden', !_copyTradingEnabled);
+  if (idInput && cfg.trader_id) idInput.value = cfg.trader_id;
+  if (statusEl) {
+    if (_copyTradingEnabled && cfg.trader_id) {
+      statusEl.textContent = `Mirroring: ${cfg.trader_id}`;
+      statusEl.className = 'copy-trading-status text-purple';
+    } else if (_copyTradingEnabled) {
+      statusEl.textContent = 'Copy trading on \u2013 enter a trader ID';
+      statusEl.className = 'copy-trading-status text-gold';
+    } else {
+      statusEl.textContent = 'Custom strategy active';
+      statusEl.className = 'copy-trading-status';
+    }
+  }
+}
+
+async function switchMode(mode) {
+  if (mode === 'strategy' && !_copyTradingEnabled) return;
+  if (mode === 'copy' && _copyTradingEnabled) return;
+
+  if (mode === 'strategy') {
+    // Disable copy trading immediately
+    try {
+      const r = await fetch(`${API}/copytrading/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: false, trader_id: '' }),
+      });
+      const data = await r.json();
+      if (!data.ok) { alert(`Error switching mode: ${data.message}`); return; }
+    } catch (e) { alert(`Could not save mode: ${e.message}`); return; }
+  }
+
+  if (mode === 'copy') {
+    // Show the copy trading UI; user still needs to enter trader ID and click Apply.
+    _copyTradingEnabled = true;
+  }
+
+  await refreshAll();
+}
+
+async function saveCopyTradingConfig() {
+  const idInput = document.getElementById('copy-trader-id');
+  const trader_id = idInput ? idInput.value.trim() : '';
+
+  try {
+    const r = await fetch(`${API}/copytrading/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true, trader_id }),
+    });
+    const data = await r.json();
+    if (!data.ok) { alert(`Copy trading config error: ${data.message}`); return; }
+    await refreshAll();
+  } catch (e) { alert(`Could not save copy trading config: ${e.message}`); }
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function formatPrice(value) {
@@ -600,6 +723,7 @@ function setupClass(hint) {
 function modeClass(mode) {
   if (mode === 'papertrading') return 'text-blue';
   if (mode === 'realtrading')  return 'text-green';
+  if (mode === 'copytrading')  return 'text-purple';
   return 'text-gold';
 }
 

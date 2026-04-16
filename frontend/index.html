@@ -22,7 +22,13 @@
     </div>
     <!-- ── Trading Mode Selector ─────────────────────────────────────────── -->
     <div class="mode-selector-bar" id="mode-selector-bar">
-      <span class="mode-label">Trading Mode:</span>
+      <span class="mode-label">Environment:</span>
+      <div class="mode-buttons">
+        <button class="mode-btn" id="mode-btn-paper" onclick="switchTradingMode('papertrading')">Paper Trading</button>
+        <button class="mode-btn mode-btn--active" id="mode-btn-real" onclick="switchTradingMode('realtrading')">Real Trading</button>
+      </div>
+
+      <span class="mode-label">Strategy:</span>
       <div class="mode-buttons">
         <button class="mode-btn mode-btn--active" id="mode-btn-strategy" onclick="switchMode('strategy')">Custom Strategy</button>
         <button class="mode-btn" id="mode-btn-copy" onclick="switchMode('copy')">Copy Trading</button>

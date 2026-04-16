@@ -71,6 +71,13 @@ class TradingBot:
         self._stop_loss_pct = sym_params["stop_loss_pct"]
         self._take_profit_pct = sym_params["take_profit_pct"]
 
+        # Copy trading state – loaded from DB each time the bot starts
+        self._copy_trading: bool = False
+        self._copy_trader_id: str = ""
+        # Tracks which (symbol, direction) positions the lead trader had on the
+        # last poll so we can detect new opens and closes.
+        self._known_copy_positions: set[str] = set()
+
         db.init_db()
         db.update_bot_status(symbol=self.symbol, running=0)
         db.log_event(
@@ -86,6 +93,15 @@ class TradingBot:
                 return
             self._running = True
             self._stop_event.clear()
+        # Refresh copy trading settings from DB so runtime changes take effect
+        # without requiring a server restart.
+        ct = db.get_copy_trading_config()
+        self._copy_trading = ct.get("enabled", False)
+        self._copy_trader_id = ct.get("trader_id", "") or ""
+        if self._copy_trading and self._copy_trader_id:
+            db.log_event(
+                f"Copy trading ENABLED for {self.symbol} (trader: {self._copy_trader_id})"
+            )
         db.update_bot_status(symbol=self.symbol, running=1)
         db.log_event(f"Bot started ({self.symbol})")
         # Seed equity immediately so the dashboard shows the correct value
@@ -228,6 +244,16 @@ class TradingBot:
         self._manage_open_trades(open_trades, last_price)
 
         # ── Generate signal ───────────────────────────────────────────────────
+        # Re-read copy trading config each tick so runtime changes take effect
+        # within one candle cycle without needing a bot restart.
+        ct = db.get_copy_trading_config()
+        self._copy_trading = ct.get("enabled", False)
+        self._copy_trader_id = ct.get("trader_id", "") or ""
+
+        if self._copy_trading and self._copy_trader_id:
+            self._tick_copy_trading(open_trades, exchange_has_pos, last_price, equity)
+            return
+
         signal = generate_signal(df, symbol=self.symbol)
         db.update_bot_status(symbol=self.symbol, last_signal=signal)
         db.log_event(f"Signal: {signal} @ {last_price:.2f}")
@@ -441,6 +467,147 @@ class TradingBot:
             )
         except Exception as exc:
             db.log_event(f"Open order failed: {exc}", level="ERROR")
+
+    # ── Copy trading ──────────────────────────────────────────────────────────
+
+    def _tick_copy_trading(
+        self,
+        open_trades: list[dict],
+        exchange_has_pos: bool,
+        last_price: float,
+        equity: float | None,
+    ) -> None:
+        """Mirror the lead trader's open positions for this bot's symbol.
+
+        Logic:
+          1. Fetch all lead trader open positions and filter to ``self.symbol``.
+          2. Compare against ``self._known_copy_positions`` (set of direction
+             strings, e.g. ``{"LONG"}``).
+          3. New direction found → enter trade.
+          4. Direction gone → close our local trade.
+          5. Update DB hint fields so the dashboard shows copy-trading status.
+        """
+        db.update_bot_status(
+            symbol=self.symbol,
+            signal_hint="COPY_ACTIVE",
+            waiting_for=f"Mirroring trader {self._copy_trader_id}",
+        )
+
+        try:
+            all_positions = self._call_with_retries(
+                self._client.get_copy_trader_positions,
+                self._copy_trader_id,
+                label="copy_get_positions",
+            )
+        except Exception as exc:
+            db.log_event(
+                f"[COPY] Failed to fetch lead trader positions: {exc}",
+                level="WARNING",
+            )
+            return
+
+        # Filter to this bot's symbol and normalise direction to LONG/SHORT.
+        remote_directions: set[str] = set()
+        for pos in (all_positions or []):
+            inst = pos.get("instId", "")
+            if inst != self.symbol:
+                continue
+            raw_side = str(pos.get("side", "")).lower()
+            if raw_side in {"long", "buy", "net_long"}:
+                direction = Signal.LONG
+            elif raw_side in {"short", "sell", "net_short"}:
+                direction = Signal.SHORT
+            else:
+                continue
+            # Only count positions with non-zero size.
+            raw_size = pos.get("pos") or pos.get("size") or pos.get("positions", 0)
+            try:
+                if abs(float(raw_size)) > 0:
+                    remote_directions.add(direction)
+            except (TypeError, ValueError):
+                continue
+
+        prev_directions = self._known_copy_positions
+
+        # ── New positions opened by lead trader ───────────────────────────────
+        for direction in remote_directions - prev_directions:
+            if not open_trades and not exchange_has_pos and equity:
+                if self._portfolio_allows_entry(equity, last_price):
+                    db.log_event(
+                        f"[COPY] Mirroring {direction} on {self.symbol} "
+                        f"(trader: {self._copy_trader_id})"
+                    )
+                    self._enter_trade(direction, last_price, equity)
+                    # Refresh open_trades after entry so the close-detection
+                    # below doesn't incorrectly close it in the same tick.
+                    open_trades = db.get_open_trades(symbol=self.symbol)
+            else:
+                db.log_event(
+                    f"[COPY] Would mirror {direction} on {self.symbol} but "
+                    "an open trade already exists – skipping entry",
+                    level="WARNING",
+                )
+
+        # ── Positions closed by lead trader ───────────────────────────────────
+        for direction in prev_directions - remote_directions:
+            matching = [t for t in open_trades if t["direction"] == direction]
+            for trade in matching:
+                db.log_event(
+                    f"[COPY] Lead trader closed {direction} on {self.symbol} "
+                    f"– mirroring close (trade {trade['id']})"
+                )
+                if not self.paper_trading:
+                    try:
+                        close_side = "sell" if direction == Signal.LONG else "buy"
+                        close_cid = (
+                            f"copy-close-{self.symbol}-"
+                            f"{int(time.time() * 1000)}-{uuid4().hex[:8]}"
+                        )
+                        resp = self._call_with_retries(
+                            self._client.place_order,
+                            self.symbol,
+                            close_side,
+                            "market",
+                            trade["size"],
+                            client_order_id=close_cid,
+                            label="copy_close_order",
+                        )
+                        code = (
+                            str(resp.get("code", "0"))
+                            if isinstance(resp, dict)
+                            else "0"
+                        )
+                        if code != "0":
+                            db.log_event(
+                                f"[COPY] Close order rejected for trade "
+                                f"{trade['id']} (code={code})",
+                                level="ERROR",
+                            )
+                            continue
+                    except Exception as exc:
+                        db.log_event(
+                            f"[COPY] Close order failed for trade {trade['id']}: {exc}",
+                            level="ERROR",
+                        )
+                        continue
+
+                pnl = _calc_pnl(
+                    direction,
+                    trade["entry_price"],
+                    last_price,
+                    trade["size"],
+                )
+                db.close_trade(trade["id"], last_price, pnl)
+                db.log_event(
+                    f"[COPY] Trade {trade['id']} closed @ {last_price:.2f}  "
+                    f"PnL={pnl:.4f} USDT"
+                )
+                self._refresh_equity_after_close()
+
+        # Update known positions snapshot.
+        self._known_copy_positions = remote_directions
+
+        db.update_bot_status(symbol=self.symbol, last_signal="COPY")
 
     def _call_with_retries(self, fn, *args, label: str = "api_call", **kwargs):
         """Retry transient API calls with linear backoff."""

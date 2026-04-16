@@ -19,6 +19,10 @@ POST /api/bot/stop?symbol=X    – stop single symbol bot
 GET  /api/config               – current strategy parameters (read-only)
 GET  /api/market/context       – live chart + indicators (?symbol=X)
 POST /api/database/reset       – wipe all trades, logs and bot status (resets statistics)
+GET  /api/trading/mode         – read current trading mode (papertrading/realtrading)
+POST /api/trading/mode         – switch trading mode (bots must be stopped first)
+GET  /api/copytrading/config   – read copy trading settings
+POST /api/copytrading/config   – update copy trading settings
 """
 
 from __future__ import annotations
@@ -330,6 +334,42 @@ def api_stop():
     return jsonify({"ok": True, "message": f"Stopped bots: {', '.join(stopped)}"})
 
 
+# ── Trading mode ──────────────────────────────────────────────────────────────
+
+@app.get("/api/trading/mode")
+def api_trading_mode_get():
+    """Return the current trading mode (papertrading or realtrading)."""
+    return jsonify({"ok": True, "mode": config.TRADING_MODE})
+
+
+@app.post("/api/trading/mode")
+def api_trading_mode_set():
+    """Switch between papertrading and realtrading at runtime.
+
+    Expects JSON body: ``{"mode": "papertrading"}`` or ``{"mode": "realtrading"}``.
+    All bots must be stopped before switching modes.
+    """
+    body = request.get_json(silent=True) or {}
+    new_mode = str(body.get("mode", "")).strip().lower()
+    if new_mode not in {"papertrading", "realtrading"}:
+        return jsonify({"ok": False, "message": "mode must be 'papertrading' or 'realtrading'"}), 400
+
+    if new_mode == config.TRADING_MODE:
+        return jsonify({"ok": True, "mode": new_mode, "message": "Already in this mode"})
+
+    # Require all bots to be stopped before switching trading mode.
+    any_running = any(b.is_running for b in _bots.values())
+    if any_running:
+        return jsonify({"ok": False, "message": "Stop all bots before switching trading mode"}), 409
+
+    old_mode = config.TRADING_MODE
+    config.TRADING_MODE = new_mode
+    # Recreate bot instances so they pick up the new mode on next start.
+    _bots.clear()
+    db.log_event(f"Trading mode changed from {old_mode} to {new_mode}")
+    return jsonify({"ok": True, "mode": new_mode})
+
+
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 @app.get("/api/config")
@@ -458,6 +498,36 @@ def api_market_context():
             "target_band": target_band,
         }
     )
+
+
+# ── Copy trading configuration ────────────────────────────────────────────────
+
+@app.get("/api/copytrading/config")
+def api_copytrading_get():
+    """Return the current copy trading configuration."""
+    cfg = db.get_copy_trading_config()
+    return jsonify({"ok": True, "enabled": cfg["enabled"], "trader_id": cfg["trader_id"]})
+
+
+@app.post("/api/copytrading/config")
+def api_copytrading_set():
+    """Update copy trading settings.
+
+    Expects JSON body: ``{"enabled": true/false, "trader_id": "..."}``
+    When *enabled* is ``true``, *trader_id* must be a non-empty string.
+    """
+    body = request.get_json(silent=True) or {}
+    enabled = bool(body.get("enabled", False))
+    trader_id = str(body.get("trader_id", "") or "").strip()
+
+    if enabled and not trader_id:
+        return jsonify({"ok": False, "message": "trader_id is required when copy trading is enabled"}), 400
+
+    db.set_copy_trading_config(enabled=enabled, trader_id=trader_id)
+    db.log_event(
+        f"Copy trading {'ENABLED (trader: ' + trader_id + ')' if enabled else 'DISABLED'}"
+    )
+    return jsonify({"ok": True, "enabled": enabled, "trader_id": trader_id})
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

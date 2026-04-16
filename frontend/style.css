@@ -570,6 +570,11 @@ main {
   background: rgba(163, 113, 247, 0.10);
 }
 
+.mode-btn--active.mode-btn--paper {
+  color: var(--blue);
+  background: rgba(56, 139, 253, 0.10);
+}
+
 .copy-trader-input {
   background: var(--surface-2);
   border: 1px solid var(--border);

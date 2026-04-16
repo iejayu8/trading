@@ -1324,3 +1324,92 @@ class TestPnlFormula:
         status = app_client.get("/api/status?symbol=BTC-USDT").get_json()
         expected_equity = config.PAPER_START_EQUITY + r["pnl"]
         assert abs(float(status["equity"]) - expected_equity) < 1e-4
+
+
+# ── Trading mode switching ────────────────────────────────────────────────────
+
+class TestTradingMode:
+    """Tests for GET/POST /api/trading/mode endpoints."""
+
+    def test_get_returns_current_mode(self, app_client):
+        data = app_client.get("/api/trading/mode").get_json()
+        assert data["ok"] is True
+        assert data["mode"] in {"papertrading", "realtrading"}
+
+    def test_set_mode_to_papertrading(self, app_client):
+        import app as flask_app
+        import config as _config
+
+        original = _config.TRADING_MODE
+        _config.TRADING_MODE = "realtrading"
+        flask_app._bots.clear()
+        try:
+            data = app_client.post(
+                "/api/trading/mode",
+                json={"mode": "papertrading"},
+            ).get_json()
+            assert data["ok"] is True
+            assert data["mode"] == "papertrading"
+        finally:
+            _config.TRADING_MODE = original
+
+    def test_set_same_mode_is_noop(self, app_client):
+        import config as _config
+        current = _config.TRADING_MODE
+        data = app_client.post(
+            "/api/trading/mode",
+            json={"mode": current},
+        ).get_json()
+        assert data["ok"] is True
+        assert "Already" in data.get("message", "")
+
+    def test_set_invalid_mode_rejected(self, app_client):
+        r = app_client.post(
+            "/api/trading/mode",
+            json={"mode": "livetrading"},
+        )
+        assert r.status_code == 400
+        data = r.get_json()
+        assert data["ok"] is False
+
+    def test_set_mode_while_bots_running_rejected(self, app_client):
+        """Cannot switch mode while bots are running."""
+        import app as flask_app
+        import config as _config
+
+        mock_bot = MagicMock()
+        mock_bot.is_running = True
+        flask_app._bots["BTC-USDT"] = mock_bot
+
+        old_mode = _config.TRADING_MODE
+        new_mode = "papertrading" if old_mode == "realtrading" else "realtrading"
+        r = app_client.post(
+            "/api/trading/mode",
+            json={"mode": new_mode},
+        )
+        assert r.status_code == 409
+        data = r.get_json()
+        assert data["ok"] is False
+        assert "Stop all bots" in data["message"]
+
+    def test_set_mode_clears_bot_registry(self, app_client):
+        """After switching mode, bot instances are cleared so they pick up the new mode."""
+        import app as flask_app
+        import config as _config
+
+        mock_bot = MagicMock()
+        mock_bot.is_running = False
+        flask_app._bots["BTC-USDT"] = mock_bot
+
+        old_mode = _config.TRADING_MODE
+        new_mode = "papertrading" if old_mode == "realtrading" else "realtrading"
+
+        data = app_client.post(
+            "/api/trading/mode",
+            json={"mode": new_mode},
+        ).get_json()
+        assert data["ok"] is True
+        assert len(flask_app._bots) == 0
+
+        # Restore mode for other tests
+        _config.TRADING_MODE = old_mode

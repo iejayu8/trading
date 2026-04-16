@@ -86,6 +86,13 @@ def init_db() -> None:
                 win_trades    INTEGER NOT NULL DEFAULT 0,
                 updated_at    TEXT    NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS copy_trading_config (
+                id         INTEGER PRIMARY KEY DEFAULT 1,
+                enabled    INTEGER NOT NULL DEFAULT 0,
+                trader_id  TEXT    NOT NULL DEFAULT '',
+                updated_at TEXT    NOT NULL
+            );
             """
         )
 
@@ -131,6 +138,12 @@ def init_db() -> None:
         ]:
             if col not in cols:
                 conn.execute(f"ALTER TABLE bot_status ADD COLUMN {col} {defn}")
+
+        # Seed the copy_trading_config singleton row if it doesn't exist yet.
+        conn.execute(
+            "INSERT OR IGNORE INTO copy_trading_config (id, enabled, trader_id, updated_at)"
+            " VALUES (1, 0, '', datetime('now'))"
+        )
 
 
 # ── Trade operations ──────────────────────────────────────────────────────────
@@ -354,3 +367,32 @@ def reset_database() -> None:
             """
         )
 
+
+# ── Copy trading configuration ────────────────────────────────────────────────
+
+def get_copy_trading_config() -> dict:
+    """Return the current copy trading configuration as ``{enabled, trader_id}``."""
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT enabled, trader_id FROM copy_trading_config WHERE id = 1"
+        ).fetchone()
+    if row:
+        return {"enabled": bool(row["enabled"]), "trader_id": row["trader_id"]}
+    return {"enabled": False, "trader_id": ""}
+
+
+def set_copy_trading_config(enabled: bool, trader_id: str) -> None:
+    """Persist copy trading settings.  Creates the singleton row if absent."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _db() as conn:
+        conn.execute(
+            """
+            INSERT INTO copy_trading_config (id, enabled, trader_id, updated_at)
+            VALUES (1, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                enabled    = excluded.enabled,
+                trader_id  = excluded.trader_id,
+                updated_at = excluded.updated_at
+            """,
+            (1 if enabled else 0, trader_id, now),
+        )
