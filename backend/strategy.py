@@ -363,7 +363,10 @@ def get_signal_checks(df: pd.DataFrame, sym_params: dict | None = None) -> dict:
     vol_ok = pd.notna(last["volume"]) and pd.notna(vol_threshold) and last["volume"] >= vol_threshold
 
     # ATR-normalised MACD gate so the filter scales to any asset price level.
-    macd_gate = MACD_GATE_ATR_MULT * float(last["atr"]) if pd.notna(last["atr"]) else 0.0
+    # When ATR is unavailable (NaN/zero during warmup), use a very large gate
+    # so the MACD filter is effectively disabled rather than blocking all signals.
+    atr_val = float(last["atr"]) if pd.notna(last["atr"]) and float(last["atr"]) > 0 else None
+    macd_gate = MACD_GATE_ATR_MULT * atr_val if atr_val is not None else float("inf")
 
     long_checks = {
         "ADX >= threshold": bool(last["adx"] >= adx_min),
