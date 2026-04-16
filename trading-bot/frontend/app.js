@@ -24,6 +24,8 @@ let _activeChartSymbol = null;  // selected symbol in Market Context
 let _symbols = [];               // list from /api/symbols
 let _copyTradingEnabled = false; // mirrors the DB copy trading toggle
 let _tradingMode = 'realtrading'; // mirrors config.TRADING_MODE
+let _pendingCopyMode = false;    // true while user toggled Copy Trading but hasn't applied yet
+let _anyBotRunning = false;      // true when any symbol bot is running
 
 // ── Boot ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -199,11 +201,21 @@ async function refreshBotStatus() {
 
   // Bot running = any symbol is running
   const anyRunning = Object.values(allStatus).some(s => s.running === 1);
+  _anyBotRunning = anyRunning;
   document.getElementById('bot-indicator').className =
     `indicator ${anyRunning ? 'indicator--running' : 'indicator--stopped'}`;
   document.getElementById('bot-status-text').textContent = anyRunning ? 'Running' : 'Stopped';
   document.getElementById('btn-start').disabled = anyRunning;
   document.getElementById('btn-stop').disabled  = !anyRunning;
+
+  // Disable all mode-selector buttons while bots are running
+  document.querySelectorAll('#mode-selector-bar .mode-btn').forEach(btn => {
+    btn.disabled = anyRunning;
+  });
+  const applyBtn = document.querySelector('#copy-trader-input-wrap .btn');
+  if (applyBtn) applyBtn.disabled = anyRunning;
+  const traderInput = document.getElementById('copy-trader-id');
+  if (traderInput) traderInput.disabled = anyRunning;
 
   // Mode + equity from active symbol's status
   const activeStatus = allStatus[_activeParamSymbol] || {};
@@ -602,14 +614,10 @@ async function loadTradingMode() {
 
 async function switchTradingMode(mode) {
   if (mode === _tradingMode) return;
+  if (_anyBotRunning) { alert('Stop all bots before switching trading mode.'); return; }
 
   const label = mode === 'papertrading' ? 'Paper Trading' : 'Real Trading';
-  if (!confirm(`Switch to ${label}?\n\nAll bots will be stopped. You will need to restart them manually.`)) return;
-
-  // Stop bots first
-  try {
-    await fetch(`${API}/bot/stop`, { method: 'POST' });
-  } catch { /* bots may already be stopped */ }
+  if (!confirm(`Switch to ${label}?`)) return;
 
   try {
     const r = await fetch(`${API}/trading/mode`, {
@@ -630,7 +638,12 @@ async function loadCopyTradingConfig() {
   let cfg;
   try { cfg = await fetchJSON(`${API}/copytrading/config`); } catch { return; }
 
-  _copyTradingEnabled = !!cfg.enabled;
+  // If the user toggled to Copy Trading but hasn't clicked Apply yet, keep
+  // showing the copy-trading input UI instead of snapping back to the DB state.
+  if (!_pendingCopyMode) {
+    _copyTradingEnabled = !!cfg.enabled;
+  }
+
   const inputWrap = document.getElementById('copy-trader-input-wrap');
   const idInput = document.getElementById('copy-trader-id');
   const statusEl = document.getElementById('copy-trading-status');
@@ -647,9 +660,12 @@ async function loadCopyTradingConfig() {
   if (inputWrap) inputWrap.classList.toggle('hidden', !_copyTradingEnabled);
   if (idInput && cfg.trader_id) idInput.value = cfg.trader_id;
   if (statusEl) {
-    if (_copyTradingEnabled && cfg.trader_id) {
+    if (_copyTradingEnabled && cfg.enabled && cfg.trader_id) {
       statusEl.textContent = `Mirroring: ${cfg.trader_id}`;
       statusEl.className = 'copy-trading-status text-purple';
+    } else if (_copyTradingEnabled && _pendingCopyMode) {
+      statusEl.textContent = 'Copy trading selected \u2013 enter a trader ID and click Apply';
+      statusEl.className = 'copy-trading-status text-gold';
     } else if (_copyTradingEnabled) {
       statusEl.textContent = 'Copy trading on \u2013 enter a trader ID';
       statusEl.className = 'copy-trading-status text-gold';
@@ -663,9 +679,11 @@ async function loadCopyTradingConfig() {
 async function switchMode(mode) {
   if (mode === 'strategy' && !_copyTradingEnabled) return;
   if (mode === 'copy' && _copyTradingEnabled) return;
+  if (_anyBotRunning) { alert('Stop all bots before switching strategy mode.'); return; }
 
   if (mode === 'strategy') {
     // Disable copy trading immediately
+    _pendingCopyMode = false;
     try {
       const r = await fetch(`${API}/copytrading/config`, {
         method: 'POST',
@@ -679,6 +697,7 @@ async function switchMode(mode) {
 
   if (mode === 'copy') {
     // Show the copy trading UI; user still needs to enter trader ID and click Apply.
+    _pendingCopyMode = true;
     _copyTradingEnabled = true;
   }
 
@@ -686,8 +705,11 @@ async function switchMode(mode) {
 }
 
 async function saveCopyTradingConfig() {
+  if (_anyBotRunning) { alert('Stop all bots before changing copy trading settings.'); return; }
   const idInput = document.getElementById('copy-trader-id');
   const trader_id = idInput ? idInput.value.trim() : '';
+
+  if (!trader_id) { alert('Enter a Trader ID before clicking Apply.'); return; }
 
   try {
     const r = await fetch(`${API}/copytrading/config`, {
@@ -697,6 +719,7 @@ async function saveCopyTradingConfig() {
     });
     const data = await r.json();
     if (!data.ok) { alert(`Copy trading config error: ${data.message}`); return; }
+    _pendingCopyMode = false;   // Applied – real state is now in the DB
     await refreshAll();
   } catch (e) { alert(`Could not save copy trading config: ${e.message}`); }
 }

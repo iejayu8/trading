@@ -1413,3 +1413,232 @@ class TestTradingMode:
 
         # Restore mode for other tests
         _config.TRADING_MODE = old_mode
+
+
+# ── Header button gating (mode buttons disabled while bots running) ──────────
+
+class TestModeButtonGating:
+    """Verify that mode-changing endpoints reject requests when bots are running.
+
+    The frontend disables these buttons when bots are running, but the backend
+    must also enforce this so that direct API calls cannot bypass the guard.
+    """
+
+    def test_trading_mode_switch_blocked_while_running(self, app_client):
+        """POST /api/trading/mode returns 409 when any bot is running."""
+        import app as flask_app
+        import config as _config
+
+        mock_bot = MagicMock()
+        mock_bot.is_running = True
+        flask_app._bots["BTC-USDT"] = mock_bot
+
+        old_mode = _config.TRADING_MODE
+        new_mode = "papertrading" if old_mode == "realtrading" else "realtrading"
+        r = app_client.post("/api/trading/mode", json={"mode": new_mode})
+        assert r.status_code == 409
+        data = r.get_json()
+        assert data["ok"] is False
+        assert "Stop all bots" in data["message"]
+
+    def test_trading_mode_switch_allowed_when_stopped(self, app_client):
+        """POST /api/trading/mode succeeds when bots are stopped."""
+        import app as flask_app
+        import config as _config
+
+        flask_app._bots.clear()
+        old_mode = _config.TRADING_MODE
+        new_mode = "papertrading" if old_mode == "realtrading" else "realtrading"
+        try:
+            r = app_client.post("/api/trading/mode", json={"mode": new_mode})
+            assert r.status_code == 200
+            data = r.get_json()
+            assert data["ok"] is True
+            assert data["mode"] == new_mode
+        finally:
+            _config.TRADING_MODE = old_mode
+
+    def test_trading_mode_roundtrip(self, app_client):
+        """Switch paper→real→paper and verify GET reflects each switch."""
+        import app as flask_app
+        import config as _config
+
+        flask_app._bots.clear()
+        old_mode = _config.TRADING_MODE
+        try:
+            # Switch to paper
+            r = app_client.post("/api/trading/mode", json={"mode": "papertrading"})
+            assert r.get_json()["ok"] is True
+            assert app_client.get("/api/trading/mode").get_json()["mode"] == "papertrading"
+
+            # Switch to real
+            r = app_client.post("/api/trading/mode", json={"mode": "realtrading"})
+            assert r.get_json()["ok"] is True
+            assert app_client.get("/api/trading/mode").get_json()["mode"] == "realtrading"
+        finally:
+            _config.TRADING_MODE = old_mode
+
+    def test_copy_trading_config_save_works(self, app_client):
+        """POST /api/copytrading/config enables copy trading with a trader ID."""
+        r = app_client.post(
+            "/api/copytrading/config",
+            json={"enabled": True, "trader_id": "test_trader_123"},
+        )
+        data = r.get_json()
+        assert data["ok"] is True
+        assert data["enabled"] is True
+        assert data["trader_id"] == "test_trader_123"
+
+        # Verify GET returns the saved config
+        cfg = app_client.get("/api/copytrading/config").get_json()
+        assert cfg["enabled"] is True
+        assert cfg["trader_id"] == "test_trader_123"
+
+    def test_copy_trading_disable_works(self, app_client):
+        """Switching to custom strategy disables copy trading."""
+        # Enable first
+        app_client.post(
+            "/api/copytrading/config",
+            json={"enabled": True, "trader_id": "some_trader"},
+        )
+        # Disable (this is what the Custom Strategy button does)
+        r = app_client.post(
+            "/api/copytrading/config",
+            json={"enabled": False, "trader_id": ""},
+        )
+        data = r.get_json()
+        assert data["ok"] is True
+        assert data["enabled"] is False
+
+        # Verify GET confirms disabled
+        cfg = app_client.get("/api/copytrading/config").get_json()
+        assert cfg["enabled"] is False
+
+    def test_copy_trading_enable_requires_trader_id(self, app_client):
+        """Cannot enable copy trading without a trader ID."""
+        r = app_client.post(
+            "/api/copytrading/config",
+            json={"enabled": True, "trader_id": ""},
+        )
+        assert r.status_code == 400
+        data = r.get_json()
+        assert data["ok"] is False
+        assert "trader_id" in data["message"]
+
+    def test_copy_trading_roundtrip_strategy_then_copy(self, app_client):
+        """Switch strategy→copy→strategy and verify each state."""
+        # Start with custom strategy (copy disabled)
+        app_client.post(
+            "/api/copytrading/config",
+            json={"enabled": False, "trader_id": ""},
+        )
+        cfg = app_client.get("/api/copytrading/config").get_json()
+        assert cfg["enabled"] is False
+
+        # Enable copy trading with a trader ID
+        app_client.post(
+            "/api/copytrading/config",
+            json={"enabled": True, "trader_id": "roundtrip_trader"},
+        )
+        cfg = app_client.get("/api/copytrading/config").get_json()
+        assert cfg["enabled"] is True
+        assert cfg["trader_id"] == "roundtrip_trader"
+
+        # Back to custom strategy
+        app_client.post(
+            "/api/copytrading/config",
+            json={"enabled": False, "trader_id": ""},
+        )
+        cfg = app_client.get("/api/copytrading/config").get_json()
+        assert cfg["enabled"] is False
+
+    def test_status_reflects_mode_after_switch(self, app_client):
+        """GET /api/status shows the new trading_mode after switching."""
+        import app as flask_app
+        import config as _config
+
+        flask_app._bots.clear()
+        old_mode = _config.TRADING_MODE
+        try:
+            app_client.post("/api/trading/mode", json={"mode": "papertrading"})
+            status = app_client.get("/api/status").get_json()
+            for sym_status in status.values():
+                assert sym_status["trading_mode"] == "papertrading"
+        finally:
+            _config.TRADING_MODE = old_mode
+
+    def test_mode_switch_clears_bots_for_fresh_instances(self, app_client):
+        """After mode switch, _bots is empty so new starts create fresh instances."""
+        import app as flask_app
+        import config as _config
+
+        # Plant a stopped mock bot
+        mock_bot = MagicMock()
+        mock_bot.is_running = False
+        flask_app._bots["BTC-USDT"] = mock_bot
+
+        old_mode = _config.TRADING_MODE
+        new_mode = "papertrading" if old_mode == "realtrading" else "realtrading"
+        try:
+            r = app_client.post("/api/trading/mode", json={"mode": new_mode})
+            assert r.get_json()["ok"] is True
+            assert len(flask_app._bots) == 0
+        finally:
+            _config.TRADING_MODE = old_mode
+
+    def test_full_button_workflow(self, app_client):
+        """Simulate the complete frontend button workflow:
+        1. Start with Real Trading + Custom Strategy (bots stopped)
+        2. Switch to Paper Trading
+        3. Switch to Copy Trading, apply trader ID
+        4. Switch back to Custom Strategy
+        5. Switch back to Real Trading
+        """
+        import app as flask_app
+        import config as _config
+
+        flask_app._bots.clear()
+        old_mode = _config.TRADING_MODE
+        _config.TRADING_MODE = "realtrading"
+        try:
+            # Step 1: Verify initial state
+            mode = app_client.get("/api/trading/mode").get_json()
+            assert mode["mode"] == "realtrading"
+            cfg = app_client.get("/api/copytrading/config").get_json()
+            # (copy may be on or off from other tests; disable it)
+            app_client.post(
+                "/api/copytrading/config",
+                json={"enabled": False, "trader_id": ""},
+            )
+            cfg = app_client.get("/api/copytrading/config").get_json()
+            assert cfg["enabled"] is False
+
+            # Step 2: Switch to Paper Trading
+            r = app_client.post("/api/trading/mode", json={"mode": "papertrading"})
+            assert r.get_json()["ok"] is True
+            assert app_client.get("/api/trading/mode").get_json()["mode"] == "papertrading"
+
+            # Step 3: Switch to Copy Trading
+            r = app_client.post(
+                "/api/copytrading/config",
+                json={"enabled": True, "trader_id": "workflow_leader"},
+            )
+            assert r.get_json()["ok"] is True
+            cfg = app_client.get("/api/copytrading/config").get_json()
+            assert cfg["enabled"] is True
+            assert cfg["trader_id"] == "workflow_leader"
+
+            # Step 4: Switch back to Custom Strategy
+            r = app_client.post(
+                "/api/copytrading/config",
+                json={"enabled": False, "trader_id": ""},
+            )
+            assert r.get_json()["ok"] is True
+            assert app_client.get("/api/copytrading/config").get_json()["enabled"] is False
+
+            # Step 5: Switch back to Real Trading
+            r = app_client.post("/api/trading/mode", json={"mode": "realtrading"})
+            assert r.get_json()["ok"] is True
+            assert app_client.get("/api/trading/mode").get_json()["mode"] == "realtrading"
+        finally:
+            _config.TRADING_MODE = old_mode
