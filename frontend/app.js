@@ -581,19 +581,26 @@ async function resetDatabase() {
   } catch (e) { alert('Could not reach API server: ' + e.message); }
 }
 
-// ── Copy trading controls ──────────────────────────────────────────────────
+// ── Mode selector & copy trading controls ──────────────────────────────────
 
 async function loadCopyTradingConfig() {
   let cfg;
   try { cfg = await fetchJSON(`${API}/copytrading/config`); } catch { return; }
 
   _copyTradingEnabled = !!cfg.enabled;
-  const toggle = document.getElementById('copy-trading-toggle');
   const inputWrap = document.getElementById('copy-trader-input-wrap');
   const idInput = document.getElementById('copy-trader-id');
   const statusEl = document.getElementById('copy-trading-status');
+  const btnStrategy = document.getElementById('mode-btn-strategy');
+  const btnCopy = document.getElementById('mode-btn-copy');
 
-  if (toggle) toggle.checked = _copyTradingEnabled;
+  // Sync toggle buttons
+  if (btnStrategy && btnCopy) {
+    btnStrategy.classList.toggle('mode-btn--active', !_copyTradingEnabled);
+    btnCopy.classList.toggle('mode-btn--active', _copyTradingEnabled);
+    btnCopy.classList.toggle('mode-btn--copy', _copyTradingEnabled);
+  }
+
   if (inputWrap) inputWrap.classList.toggle('hidden', !_copyTradingEnabled);
   if (idInput && cfg.trader_id) idInput.value = cfg.trader_id;
   if (statusEl) {
@@ -601,7 +608,7 @@ async function loadCopyTradingConfig() {
       statusEl.textContent = `Mirroring: ${cfg.trader_id}`;
       statusEl.className = 'copy-trading-status text-purple';
     } else if (_copyTradingEnabled) {
-      statusEl.textContent = 'Copy trading on – enter a trader ID';
+      statusEl.textContent = 'Copy trading on \u2013 enter a trader ID';
       statusEl.className = 'copy-trading-status text-gold';
     } else {
       statusEl.textContent = 'Custom strategy active';
@@ -610,23 +617,40 @@ async function loadCopyTradingConfig() {
   }
 }
 
-function onCopyTradingToggle() {
-  const toggle = document.getElementById('copy-trading-toggle');
-  const inputWrap = document.getElementById('copy-trader-input-wrap');
-  if (inputWrap) inputWrap.classList.toggle('hidden', !toggle.checked);
+async function switchMode(mode) {
+  if (mode === 'strategy' && !_copyTradingEnabled) return;
+  if (mode === 'copy' && _copyTradingEnabled) return;
+
+  if (mode === 'strategy') {
+    // Disable copy trading immediately
+    try {
+      const r = await fetch(`${API}/copytrading/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: false, trader_id: '' }),
+      });
+      const data = await r.json();
+      if (!data.ok) { alert(`Error switching mode: ${data.message}`); return; }
+    } catch (e) { alert(`Could not save mode: ${e.message}`); return; }
+  }
+
+  if (mode === 'copy') {
+    // Show the copy trading UI; user still needs to enter trader ID and click Apply.
+    _copyTradingEnabled = true;
+  }
+
+  await refreshAll();
 }
 
 async function saveCopyTradingConfig() {
-  const toggle = document.getElementById('copy-trading-toggle');
   const idInput = document.getElementById('copy-trader-id');
-  const enabled = toggle ? toggle.checked : false;
   const trader_id = idInput ? idInput.value.trim() : '';
 
   try {
     const r = await fetch(`${API}/copytrading/config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled, trader_id }),
+      body: JSON.stringify({ enabled: true, trader_id }),
     });
     const data = await r.json();
     if (!data.ok) { alert(`Copy trading config error: ${data.message}`); return; }

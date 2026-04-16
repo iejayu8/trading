@@ -23,7 +23,7 @@ from strategy import (
     MIN_BARS_REQUIRED,
     SIGNAL_COOLDOWN,
     Signal,
-    _last_signal_bar,
+    _last_signal_ts,
     compute_indicators,
     generate_signal,
     get_signal_checks,
@@ -81,18 +81,18 @@ class TestResetSignalState:
         reset_signal_state()
 
     def test_reset_all(self):
-        _last_signal_bar["BTC-USDT"] = 100
-        _last_signal_bar["ETH-USDT"] = 200
+        _last_signal_ts["BTC-USDT"] = pd.Timestamp("2024-01-01", tz="UTC")
+        _last_signal_ts["ETH-USDT"] = pd.Timestamp("2024-01-02", tz="UTC")
         reset_signal_state()
-        assert "BTC-USDT" not in _last_signal_bar
-        assert "ETH-USDT" not in _last_signal_bar
+        assert "BTC-USDT" not in _last_signal_ts
+        assert "ETH-USDT" not in _last_signal_ts
 
     def test_reset_specific_symbol(self):
-        _last_signal_bar["BTC-USDT"] = 100
-        _last_signal_bar["ETH-USDT"] = 200
+        _last_signal_ts["BTC-USDT"] = pd.Timestamp("2024-01-01", tz="UTC")
+        _last_signal_ts["ETH-USDT"] = pd.Timestamp("2024-01-02", tz="UTC")
         reset_signal_state("BTC-USDT")
-        assert "BTC-USDT" not in _last_signal_bar
-        assert "ETH-USDT" in _last_signal_bar
+        assert "BTC-USDT" not in _last_signal_ts
+        assert "ETH-USDT" in _last_signal_ts
 
     def test_reset_nonexistent_symbol(self):
         """Should not raise when resetting a symbol that doesn't exist."""
@@ -111,7 +111,7 @@ class TestResetSignalState:
 
         # Reset and verify cooldown is cleared
         reset_signal_state("BTC-USDT")
-        assert "BTC-USDT" not in _last_signal_bar
+        assert "BTC-USDT" not in _last_signal_ts
 
 
 # ── get_signal_diagnostics ────────────────────────────────────────────────────

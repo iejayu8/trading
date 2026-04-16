@@ -511,8 +511,8 @@ main {
 /* ── Buttons (additional) ────────────────────────────────────────────────── */
 .btn--primary { background: var(--blue); color: #fff; }
 
-/* ── Copy trading bar ─────────────────────────────────────────────────────── */
-.copy-trading-bar {
+/* ── Mode selector bar ────────────────────────────────────────────────────── */
+.mode-selector-bar {
   max-width: 1400px;
   margin: 0 auto;
   padding: 8px 24px;
@@ -523,22 +523,51 @@ main {
   flex-wrap: wrap;
 }
 
-.toggle-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
+.mode-label {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--text-muted);
   user-select: none;
 }
 
-.toggle-label input[type="checkbox"] {
-  width: 15px;
-  height: 15px;
+.mode-buttons {
+  display: flex;
+  gap: 0;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.mode-btn {
+  background: var(--surface-2);
+  border: none;
+  color: var(--text-muted);
   cursor: pointer;
-  accent-color: #a371f7;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font);
+  padding: 6px 18px;
+  transition: color 0.15s, background 0.15s;
+  border-right: 1px solid var(--border);
+}
+
+.mode-btn:last-child {
+  border-right: none;
+}
+
+.mode-btn:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.mode-btn--active {
+  color: var(--accent);
+  background: rgba(240, 185, 11, 0.10);
+}
+
+.mode-btn--active.mode-btn--copy {
+  color: #a371f7;
+  background: rgba(163, 113, 247, 0.10);
 }
 
 .copy-trader-input {
