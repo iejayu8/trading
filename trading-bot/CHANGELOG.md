@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.0
+- Add **Paper / Real Trading mode toggle** in the dashboard header — switch between `papertrading` and `realtrading` at runtime without restarting the add-on (bots must be stopped first)
+- New API endpoints: `GET /api/trading/mode` and `POST /api/trading/mode`
+- Reorganise the mode-selector bar into two sections: **Environment** (Paper / Real Trading) and **Strategy** (Custom Strategy / Copy Trading)
+- Sync `trading-bot/` add-on directory with root source — all v1.5.0–v1.6.0 features (copy trading UI, ATR-normalised MACD gate, copy trading backend) now included in the add-on
+
 ## 1.6.0
 - Fix **bot not opening operations** — the MACD histogram filter used a hardcoded ±50 threshold that was only meaningful for BTC-USDT; replaced with ATR-normalised gate (`0.5 × ATR`) so the filter scales correctly to every symbol's price level and volatility
 - Fix **copy trading mode cannot be disabled** — unchecking the old checkbox toggle hid the "Apply" button, making it impossible to save the disabled state once copy trading was activated; the bot would remain stuck in copy-trading mode, skipping its own strategy signals entirely

@@ -19,6 +19,8 @@ POST /api/bot/stop?symbol=X    – stop single symbol bot
 GET  /api/config               – current strategy parameters (read-only)
 GET  /api/market/context       – live chart + indicators (?symbol=X)
 POST /api/database/reset       – wipe all trades, logs and bot status (resets statistics)
+GET  /api/trading/mode         – read current trading mode (papertrading/realtrading)
+POST /api/trading/mode         – switch trading mode (bots must be stopped first)
 GET  /api/copytrading/config   – read copy trading settings
 POST /api/copytrading/config   – update copy trading settings
 """
@@ -330,6 +332,42 @@ def api_stop():
     if not stopped:
         return jsonify({"ok": False, "message": "No bots are running"}), 400
     return jsonify({"ok": True, "message": f"Stopped bots: {', '.join(stopped)}"})
+
+
+# ── Trading mode ──────────────────────────────────────────────────────────────
+
+@app.get("/api/trading/mode")
+def api_trading_mode_get():
+    """Return the current trading mode (papertrading or realtrading)."""
+    return jsonify({"ok": True, "mode": config.TRADING_MODE})
+
+
+@app.post("/api/trading/mode")
+def api_trading_mode_set():
+    """Switch between papertrading and realtrading at runtime.
+
+    Expects JSON body: ``{"mode": "papertrading"}`` or ``{"mode": "realtrading"}``.
+    All bots must be stopped before switching modes.
+    """
+    body = request.get_json(silent=True) or {}
+    new_mode = str(body.get("mode", "")).strip().lower()
+    if new_mode not in {"papertrading", "realtrading"}:
+        return jsonify({"ok": False, "message": "mode must be 'papertrading' or 'realtrading'"}), 400
+
+    if new_mode == config.TRADING_MODE:
+        return jsonify({"ok": True, "mode": new_mode, "message": "Already in this mode"})
+
+    # Require all bots to be stopped before switching trading mode.
+    any_running = any(b.is_running for b in _bots.values())
+    if any_running:
+        return jsonify({"ok": False, "message": "Stop all bots before switching trading mode"}), 409
+
+    old_mode = config.TRADING_MODE
+    config.TRADING_MODE = new_mode
+    # Recreate bot instances so they pick up the new mode on next start.
+    _bots.clear()
+    db.log_event(f"Trading mode changed from {old_mode} to {new_mode}")
+    return jsonify({"ok": True, "mode": new_mode})
 
 
 # ── Configuration ─────────────────────────────────────────────────────────────
