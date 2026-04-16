@@ -44,7 +44,7 @@ Entry conditions (LONG)
 4. Fresh pullback: RSI dropped below 46 within the last 3 bars
 5. Recovery      : current RSI ≥ 49 (momentum returning)
 6. Price above   : close > fast EMA (9) — price reclaimed the fast EMA
-7. MACD hist     : current bar ≥ -50 (not in strong downtrend)
+7. MACD hist     : current bar ≥ −0.5 × ATR  (not in strong downtrend)
 8. Volume        : current bar ≥ 0.9× 20-period SMA
 
 Entry conditions (SHORT) are the mirror image.
@@ -108,6 +108,14 @@ PULLBACK_LOOKBACK = 3
 # Number of bars to look back for the RSI dip/spike (45 min on 15-min chart).
 # Tightened from 4 → 3 (v7): an even fresher pullback within the last 45 minutes
 # is a stronger signal; stale 1-hour setups add noise.
+
+MACD_GATE_ATR_MULT = 0.5
+# MACD histogram gate expressed as a multiple of ATR so the filter scales
+# with the asset's price level and volatility.  A value of 0.5 means:
+#   LONG  → macd_hist >= -0.5 × ATR  (reject entry when bearish momentum is extreme)
+#   SHORT → macd_hist <=  0.5 × ATR  (reject entry when bullish momentum is extreme)
+# Replaces the former hardcoded ±50 which was only meaningful for BTC-USDT
+# ($80k price range) and a no-op for smaller-priced assets like XRP/LINK.
 
 VOLUME_MULT = 0.9
 # Volume floor: current bar must be ≥ 90 % of its SMA.
@@ -354,6 +362,9 @@ def get_signal_checks(df: pd.DataFrame, sym_params: dict | None = None) -> dict:
     vol_threshold = VOLUME_MULT * last["volume_sma"] if pd.notna(last["volume_sma"]) else np.nan
     vol_ok = pd.notna(last["volume"]) and pd.notna(vol_threshold) and last["volume"] >= vol_threshold
 
+    # ATR-normalised MACD gate so the filter scales to any asset price level.
+    macd_gate = MACD_GATE_ATR_MULT * float(last["atr"]) if pd.notna(last["atr"]) else 0.0
+
     long_checks = {
         "ADX >= threshold": bool(last["adx"] >= adx_min),
         "Price above EMA200": bool(last["close"] > last["ema_200"]),
@@ -361,7 +372,7 @@ def get_signal_checks(df: pd.DataFrame, sym_params: dict | None = None) -> dict:
         "Recent RSI pullback": bool((rsi_window <= rsi_pullback_max).any()),
         "RSI recovered": bool(last["rsi"] >= rsi_recovery_long),
         "Price above EMA9": bool(last["close"] > last["ema_fast"]),
-        "MACD filter": bool(last["macd_hist"] >= -50),
+        "MACD filter": bool(last["macd_hist"] >= -macd_gate),
         "Volume filter": bool(vol_ok),
     }
 
@@ -372,7 +383,7 @@ def get_signal_checks(df: pd.DataFrame, sym_params: dict | None = None) -> dict:
         "Recent RSI spike": bool((rsi_window >= rsi_pullback_min).any()),
         "RSI rejected": bool(last["rsi"] <= rsi_recovery_short),
         "Price below EMA9": bool(last["close"] < last["ema_fast"]),
-        "MACD filter": bool(last["macd_hist"] <= 50),
+        "MACD filter": bool(last["macd_hist"] <= macd_gate),
         "Volume filter": bool(vol_ok),
     }
 

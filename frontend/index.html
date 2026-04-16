@@ -20,12 +20,13 @@
         <button id="btn-stop"  class="btn btn--danger"  onclick="stopBot()" disabled>Stop All</button>
       </div>
     </div>
-    <!-- ── Copy Trading Bar ──────────────────────────────────────────────── -->
-    <div class="copy-trading-bar" id="copy-trading-controls">
-      <label class="toggle-label">
-        <input type="checkbox" id="copy-trading-toggle" onchange="onCopyTradingToggle()" />
-        Copy Trading
-      </label>
+    <!-- ── Trading Mode Selector ─────────────────────────────────────────── -->
+    <div class="mode-selector-bar" id="mode-selector-bar">
+      <span class="mode-label">Trading Mode:</span>
+      <div class="mode-buttons">
+        <button class="mode-btn mode-btn--active" id="mode-btn-strategy" onclick="switchMode('strategy')">Custom Strategy</button>
+        <button class="mode-btn" id="mode-btn-copy" onclick="switchMode('copy')">Copy Trading</button>
+      </div>
       <div id="copy-trader-input-wrap" class="hidden">
         <input type="text" id="copy-trader-id" class="copy-trader-input"
                placeholder="Trader ID / Unique Name" maxlength="100" />

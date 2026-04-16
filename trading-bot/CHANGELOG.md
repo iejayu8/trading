@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.0
+- Fix **bot not opening operations** — the MACD histogram filter used a hardcoded ±50 threshold that was only meaningful for BTC-USDT; replaced with ATR-normalised gate (`0.5 × ATR`) so the filter scales correctly to every symbol's price level and volatility
+- Fix **copy trading mode cannot be disabled** — unchecking the old checkbox toggle hid the "Apply" button, making it impossible to save the disabled state once copy trading was activated; the bot would remain stuck in copy-trading mode, skipping its own strategy signals entirely
+- Replace the copy trading checkbox with a proper **mode selector** (Custom Strategy / Copy Trading toggle buttons) in the dashboard header; clicking "Custom Strategy" immediately disables copy trading and saves to the database
+- Fix broken `test_strategy_diagnostics.py` test file — import of removed symbol `_last_signal_bar` updated to `_last_signal_ts` (renamed in v1.4.2 cooldown fix)
+
 ## 1.5.0
 - Add **Copy Trading** mode — mirror a BloFin lead trader's open positions instead of using the built-in strategy
 - New toggle in the dashboard header switches between *Custom Strategy* and *Copy Trading*; entering a Trader ID / Unique Name and clicking **Apply** activates mirroring
