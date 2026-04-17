@@ -500,7 +500,7 @@ main {
 
 /* ── Collapsible panel body ───────────────────────────────────────────────── */
 .panel-body.collapsed {
-  display: none;
+  display: none !important;
 }
 
 .collapsible-panel .panel__head--with-tabs {
