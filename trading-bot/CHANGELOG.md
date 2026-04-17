@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.7.8
+- Hide Live Symbol Status, Strategy Parameters & Market Context panels when copy trading is active and bot is running; show a Copy Trading – Open Positions table with live unrealised PnL instead
+
 ## 1.7.7
 - Fix all 4 header mode buttons: proper backend integration, disable when bots running, fix copy trading toggle
 

@@ -135,6 +135,23 @@
 
     </div><!-- /symbol-panel -->
 
+    <!-- ── Copy Trading Open Positions (shown when copy trading + bot running) ── -->
+    <section class="panel hidden" id="copy-positions-panel">
+      <h2 class="panel__title">Copy Trading – Open Positions <span class="tag tag--purple">Mirroring</span></h2>
+      <div class="table-scroll">
+        <table class="data-table" id="copy-positions-table">
+          <thead>
+            <tr>
+              <th>#</th><th>Symbol</th><th>Direction</th><th>Entry</th>
+              <th>Size</th><th>Value (USDT)</th><th>SL</th><th>TP</th>
+              <th>Current Profit</th><th>Opened</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- ── Trade History (common) ────────────────────────────────────────── -->
     <section class="panel">
       <h2 class="panel__title">Trade History <span class="tag tag--info">All Symbols</span></h2>

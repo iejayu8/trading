@@ -608,3 +608,9 @@ main {
   font-size: 12px;
   color: var(--text-muted);
 }
+
+/* ── Copy Trading Open Positions tag ─────────────────────────────────────── */
+.tag--purple {
+  background: rgba(163, 113, 247, 0.15);
+  color: #a371f7;
+}
