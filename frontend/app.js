@@ -23,6 +23,7 @@ let _activeParamSymbol = null;  // selected symbol in Strategy Parameters
 let _activeChartSymbol = null;  // selected symbol in Market Context
 let _symbols = [];               // list from /api/symbols
 let _copyTradingEnabled = false; // mirrors the DB copy trading toggle
+let _copyTradingPendingApply = false; // true while user is entering a trader ID
 let _tradingMode = 'realtrading'; // mirrors config.TRADING_MODE
 
 // ── Boot ───────────────────────────────────────────────────────────────────
@@ -684,6 +685,9 @@ function updateCopyTradingUI(enabled, trader_id) {
 }
 
 async function loadCopyTradingConfig() {
+  // Don't override local UI while the user is entering a trader ID
+  if (_copyTradingPendingApply) return;
+
   let cfg;
   try { cfg = await fetchJSON(`${API}/copytrading/config`); } catch { return; }
 
@@ -697,6 +701,7 @@ async function switchMode(mode) {
 
   if (mode === 'strategy') {
     // Disable copy trading immediately
+    _copyTradingPendingApply = false;
     try {
       const r = await apiFetch(`${API}/copytrading/config`, {
         method: 'POST',
@@ -714,6 +719,7 @@ async function switchMode(mode) {
   // (The backend requires a non-empty trader_id before it will accept enabled=true,
   // so we update the UI locally and wait for the user to enter an ID and click Apply.)
   _copyTradingEnabled = true;
+  _copyTradingPendingApply = true;
   const idInput = document.getElementById('copy-trader-id');
   updateCopyTradingUI(true, idInput ? idInput.value.trim() : '');
 }
@@ -730,6 +736,7 @@ async function saveCopyTradingConfig() {
     });
     const data = await r.json();
     if (!data.ok) { alert(`Copy trading config error: ${data.message}`); return; }
+    _copyTradingPendingApply = false;
     await refreshAll();
   } catch (e) { alert(`Could not save copy trading config: ${e.message}`); }
 }

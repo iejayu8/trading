@@ -365,6 +365,10 @@ def _refresh_equity_on_mode_switch(new_mode: str) -> None:
                 db.update_bot_status(symbol=sym, equity=equity)
             elif real_equity is not None:
                 db.update_bot_status(symbol=sym, equity=real_equity)
+            else:
+                # Exchange call failed – clear stale paper equity so the
+                # dashboard shows '–' instead of a misleading value.
+                db.update_bot_status(symbol=sym, equity=None)
         except Exception as exc:  # noqa: BLE001
             db.log_event(
                 f"Could not update equity for {sym} on mode switch: {exc}",

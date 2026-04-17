@@ -1413,3 +1413,61 @@ class TestTradingMode:
 
         # Restore mode for other tests
         _config.TRADING_MODE = old_mode
+
+    def test_switch_to_real_clears_stale_equity_on_exchange_failure(self, app_client):
+        """When switching to realtrading and the exchange balance fetch fails,
+        equity should be set to NULL so the dashboard shows '–' instead of
+        a stale paper-trading value."""
+        import app as flask_app
+        import config as _config
+
+        old_mode = _config.TRADING_MODE
+        _config.TRADING_MODE = "papertrading"
+        flask_app._bots.clear()
+
+        # Seed a non-null paper equity for a symbol
+        database.update_bot_status(symbol=_config.SUPPORTED_SYMBOLS[0], equity=1000.0)
+
+        # Patch BloFinClient to raise so real_equity stays None
+        with patch.object(flask_app, "BloFinClient", side_effect=Exception("no creds")):
+            data = app_client.post(
+                "/api/trading/mode",
+                json={"mode": "realtrading"},
+            ).get_json()
+            assert data["ok"] is True
+
+        # Equity should now be NULL (cleared), not 1000
+        status = database.get_bot_status(_config.SUPPORTED_SYMBOLS[0])
+        assert status["equity"] is None
+
+        _config.TRADING_MODE = old_mode
+
+    def test_switch_to_paper_recalculates_equity(self, app_client):
+        """Switching to papertrading should recalculate equity from
+        PAPER_START_EQUITY + closed PnL."""
+        import app as flask_app
+        import config as _config
+
+        old_mode = _config.TRADING_MODE
+        _config.TRADING_MODE = "realtrading"
+        flask_app._bots.clear()
+        sym = _config.SUPPORTED_SYMBOLS[0]
+
+        # Create a closed trade to generate PnL
+        tid = database.open_trade(
+            symbol=sym, direction="LONG", entry_price=40000.0,
+            size=0.001, sl_price=39000.0, tp_price=41600.0, leverage=5,
+        )
+        database.close_trade(tid, exit_price=41600.0, pnl=50.0)
+
+        data = app_client.post(
+            "/api/trading/mode",
+            json={"mode": "papertrading"},
+        ).get_json()
+        assert data["ok"] is True
+
+        status = database.get_bot_status(sym)
+        expected = _config.PAPER_START_EQUITY + 50.0
+        assert status["equity"] == pytest.approx(expected)
+
+        _config.TRADING_MODE = old_mode
