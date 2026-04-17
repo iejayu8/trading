@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.5
+- Address code review feedback: fix import alias, test isolation, and INSERT OR IGNORE
+- Fix import bugs in app.py and add comprehensive tests for 100% coverage
+- Initial analysis - identify code issues and coverage gaps
+
 ## 1.7.4
 - Address review: clear _copyTradingPendingApply on error and after refreshAll
 - Fix copy trading dialog hidden by polling and equity not updating on mode switch
