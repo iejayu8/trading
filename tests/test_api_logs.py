@@ -19,6 +19,9 @@ import database
 @pytest.fixture()
 def app_client(tmp_path):
     """Flask test client with an isolated temp DB."""
+    old_dir, old_stem = database._DB_DIR, database._DB_STEM
+    database._DB_DIR = tmp_path
+    database._DB_STEM = "test_api_logs"
     database.DB_PATH = tmp_path / "test_api_logs.db"
     database.init_db()
 
@@ -27,6 +30,8 @@ def app_client(tmp_path):
     flask_app.app.config["TESTING"] = True
     with flask_app.app.test_client() as client:
         yield client
+
+    database._DB_DIR, database._DB_STEM = old_dir, old_stem
 
 
 class TestApiLogs:
