@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.14
+- docs: clarify first_equity return value in docstring
+- fix: update equity from exchange when realtrading mode is activated
+
 ## 1.7.13
 - fix: update equity (USDT) from exchange as soon as realtrading mode is activated
 - Equity is now refreshed even when re-selecting the already-active mode
