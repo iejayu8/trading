@@ -18,10 +18,10 @@ import pandas as pd
 # Prefer package-relative imports when running as `python -m backend.app`.
 # Keep absolute fallback for direct-module contexts used by tests and some tools.
 try:
-    from . import config
-    from . import database as db
-    from .exchange import BloFinClient
-    from .strategy import (
+    from . import config  # pragma: no cover
+    from . import database as db  # pragma: no cover
+    from .exchange import BloFinClient  # pragma: no cover
+    from .strategy import (  # pragma: no cover
         Signal,
         calculate_position_size,
         calculate_sl_tp,

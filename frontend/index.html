@@ -14,6 +14,8 @@
         <span class="logo-text">BloFin Trading Bot</span>
       </div>
       <div class="header-status">
+        <span id="exchange-indicator" class="indicator indicator--idle" title="Exchange requests"></span>
+        <span id="exchange-status-text" class="exchange-status-text">Exchange</span>
         <span id="bot-indicator" class="indicator indicator--stopped"></span>
         <span id="bot-status-text">Stopped</span>
         <button id="btn-start" class="btn btn--success" onclick="startBot()">Start All</button>
@@ -132,6 +134,23 @@
       </section>
 
     </div><!-- /symbol-panel -->
+
+    <!-- ── Copy Trading Open Positions (shown when copy trading + bot running) ── -->
+    <section class="panel hidden" id="copy-positions-panel">
+      <h2 class="panel__title">Copy Trading – Open Positions <span class="tag tag--purple">Mirroring</span></h2>
+      <div class="table-scroll">
+        <table class="data-table" id="copy-positions-table">
+          <thead>
+            <tr>
+              <th>#</th><th>Symbol</th><th>Direction</th><th>Entry</th>
+              <th>Size</th><th>Value (USDT)</th><th>SL</th><th>TP</th>
+              <th>Current Profit</th><th>Opened</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
 
     <!-- ── Trade History (common) ────────────────────────────────────────── -->
     <section class="panel">

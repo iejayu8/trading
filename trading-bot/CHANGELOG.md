@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.7.9
+- Fix XSS: escape t.id and t.size, use array accumulator for innerHTML
+- Disable strategy sections and show open positions when copy trading is active and bot is running
+
+## 1.7.8
+- Hide Live Symbol Status, Strategy Parameters & Market Context panels when copy trading is active and bot is running; show a Copy Trading – Open Positions table with live unrealised PnL instead
+
+## 1.7.7
+- Fix all 4 header mode buttons: proper backend integration, disable when bots running, fix copy trading toggle
+
+## 1.7.6
+- Fix Live Symbol Status collapse button CSS specificity bug
+
+## 1.7.5
+- Address code review feedback: fix import alias, test isolation, and INSERT OR IGNORE
+- Fix import bugs in app.py and add comprehensive tests for 100% coverage
+- Initial analysis - identify code issues and coverage gaps
+
+## 1.7.4
+- Address review: clear _copyTradingPendingApply on error and after refreshAll
+- Fix copy trading dialog hidden by polling and equity not updating on mode switch
+
+## 1.7.3
+- feat: add exchange LED indicator to frontend header
+- fix: refresh equity immediately when switching trading mode
+
 ## 1.7.2
 - fix: address code review - validate version format, guard CHANGELOG newline, improve git error messages
 - feat: add auto-version-bump workflow on merge to main

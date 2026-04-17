@@ -71,6 +71,9 @@ header {
 }
 .indicator--running  { background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 1.4s infinite; }
 .indicator--stopped  { background: var(--text-muted); }
+.indicator--idle     { background: var(--text-muted); }
+.indicator--active   { background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: pulse 0.8s infinite; }
+.exchange-status-text { font-size: 12px; color: var(--text-muted); margin-right: 8px; }
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.4; }
@@ -371,7 +374,7 @@ main {
 }
 
 /* ── All-symbols live status ─────────────────────────────────────────────── */
-#all-symbols-status {
+#all-symbols-status:not(.collapsed) {
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -555,9 +558,14 @@ main {
   border-right: none;
 }
 
-.mode-btn:hover {
+.mode-btn:hover:not(:disabled) {
   color: var(--text);
   background: var(--surface);
+}
+
+.mode-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .mode-btn--active {
@@ -591,7 +599,18 @@ main {
   border-color: #a371f7;
 }
 
+.copy-trader-input:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 .copy-trading-status {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+/* ── Copy Trading Open Positions tag ─────────────────────────────────────── */
+.tag--purple {
+  background: rgba(163, 113, 247, 0.15);
+  color: #a371f7;
 }

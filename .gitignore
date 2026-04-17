@@ -45,3 +45,4 @@ backtest/results/*.json
 
 # Node
 node_modules/
+.coverage
