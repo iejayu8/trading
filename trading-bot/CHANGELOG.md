@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.2
+- fix: address code review - validate version format, guard CHANGELOG newline, improve git error messages
+- feat: add auto-version-bump workflow on merge to main
+- fix: seed real-trading equity on bot start after mode switch
+
 ## 1.7.1
 - Fix **Copy Trading toggle button doing nothing** — clicking "Copy Trading" in the strategy selector had no visible effect; `switchMode('copy')` set the local flag then called `refreshAll()` which re-fetched the server config (still `enabled: false`) and immediately overwrote the flag; extracted `updateCopyTradingUI()` helper and updated the UI directly without a server round-trip so the button, trader-ID input and status text now respond instantly
 
