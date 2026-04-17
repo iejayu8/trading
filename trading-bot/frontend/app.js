@@ -783,6 +783,7 @@ async function refreshCopyPositions() {
   }
 
   tbody.innerHTML = '';
+  const rows = [];
   trades.forEach(t => {
     const entry  = Number(t.entry_price);
     const size   = Number(t.size);
@@ -797,20 +798,21 @@ async function refreshCopyPositions() {
       currentProfitStr = `<span class="${cpPnl >= 0 ? 'text-green' : 'text-red'}">${cpPnl >= 0 ? '+' : ''}${cpPnl.toFixed(2)}</span>`;
     }
 
-    tbody.innerHTML += `
+    rows.push(`
       <tr>
-        <td>${t.id}</td>
+        <td>${escHtml(String(t.id))}</td>
         <td><strong>${escHtml(t.symbol)}</strong></td>
         <td><strong>${escHtml(t.direction)}</strong></td>
         <td>${formatPrice(t.entry_price)}</td>
-        <td>${t.size}</td>
+        <td>${escHtml(String(t.size))}</td>
         <td>$${value.toFixed(2)}</td>
         <td>${formatPrice(t.sl_price)}</td>
         <td>${formatPrice(t.tp_price)}</td>
         <td>${currentProfitStr}</td>
         <td>${fmtTs(t.opened_at)}</td>
-      </tr>`;
+      </tr>`);
   });
+  tbody.innerHTML = rows.join('');
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
