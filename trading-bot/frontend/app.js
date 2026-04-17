@@ -23,8 +23,8 @@ let _activeParamSymbol = null;  // selected symbol in Strategy Parameters
 let _activeChartSymbol = null;  // selected symbol in Market Context
 let _symbols = [];               // list from /api/symbols
 let _copyTradingEnabled = false; // mirrors the DB copy trading toggle
+let _copyTradingPendingApply = false; // true while user is entering a trader ID
 let _tradingMode = 'realtrading'; // mirrors config.TRADING_MODE
-let _pendingCopyMode = false;    // true while user toggled Copy Trading but hasn't applied yet
 let _anyBotRunning = false;      // true when any symbol bot is running
 
 // ── Boot ───────────────────────────────────────────────────────────────────
@@ -164,8 +164,35 @@ function togglePanel(bodyId, btnId) {
 
 // ── Fetch helpers ──────────────────────────────────────────────────────────
 
+/** Counter of in-flight API requests. Controls the exchange LED. */
+let _pendingRequests = 0;
+
+function _updateExchangeLed() {
+  const el = document.getElementById('exchange-indicator');
+  if (!el) return;
+  if (_pendingRequests > 0) {
+    el.className = 'indicator indicator--active';
+    el.title = `Exchange requests: ${_pendingRequests} in flight`;
+  } else {
+    el.className = 'indicator indicator--idle';
+    el.title = 'Exchange requests';
+  }
+}
+
+/** Drop-in replacement for fetch() that lights the exchange LED while active. */
+async function apiFetch(url, opts) {
+  _pendingRequests++;
+  _updateExchangeLed();
+  try {
+    return await fetch(url, opts);
+  } finally {
+    _pendingRequests--;
+    _updateExchangeLed();
+  }
+}
+
 async function fetchJSON(url) {
-  const resp = await fetch(url);
+  const resp = await apiFetch(url);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${url}`);
   return resp.json();
 }
@@ -510,7 +537,7 @@ async function refreshTradeHistory() {
 async function closeTrade(tradeId, symbol) {
   if (!confirm(`Close trade #${tradeId} (${symbol}) at current market price?`)) return;
   try {
-    const res = await fetch(`${API}/trades/${tradeId}/close`, { method: 'POST' });
+    const res = await apiFetch(`${API}/trades/${tradeId}/close`, { method: 'POST' });
     const data = await res.json();
     if (data.ok) {
       await refreshTradeHistory();
@@ -559,7 +586,7 @@ async function refreshLogs() {
 
 async function startBot() {
   try {
-    const r = await fetch(`${API}/bot/start`, { method: 'POST' });
+    const r = await apiFetch(`${API}/bot/start`, { method: 'POST' });
     const data = await r.json();
     if (!data.ok) alert(data.message);
     refreshAll();
@@ -568,7 +595,7 @@ async function startBot() {
 
 async function stopBot() {
   try {
-    const r = await fetch(`${API}/bot/stop`, { method: 'POST' });
+    const r = await apiFetch(`${API}/bot/stop`, { method: 'POST' });
     const data = await r.json();
     if (!data.ok) alert(data.message);
     refreshAll();
@@ -578,7 +605,7 @@ async function stopBot() {
 async function clearLogs() {
   if (!confirm('Clear all activity log entries?')) return;
   try {
-    const r = await fetch(`${API}/logs/clear`, { method: 'POST' });
+    const r = await apiFetch(`${API}/logs/clear`, { method: 'POST' });
     const data = await r.json();
     if (!r.ok || !data.ok) { alert(data.message || 'Could not clear log'); return; }
     await refreshLogs();
@@ -588,7 +615,7 @@ async function clearLogs() {
 async function resetDatabase() {
   if (!confirm('Reset all statistics?\n\nThis will permanently delete all trade history, activity logs, and bot status data. This action cannot be undone.\n\nMake sure all bots are stopped before resetting.')) return;
   try {
-    const r = await fetch(`${API}/database/reset`, { method: 'POST' });
+    const r = await apiFetch(`${API}/database/reset`, { method: 'POST' });
     const data = await r.json();
     if (!r.ok || !data.ok) { alert(data.message || 'Could not reset database'); return; }
     await refreshAll();
@@ -619,8 +646,13 @@ async function switchTradingMode(mode) {
   const label = mode === 'papertrading' ? 'Paper Trading' : 'Real Trading';
   if (!confirm(`Switch to ${label}?`)) return;
 
+  // Stop bots first
   try {
-    const r = await fetch(`${API}/trading/mode`, {
+    await apiFetch(`${API}/bot/stop`, { method: 'POST' });
+  } catch { /* bots may already be stopped */ }
+
+  try {
+    const r = await apiFetch(`${API}/trading/mode`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode }),
@@ -634,16 +666,7 @@ async function switchTradingMode(mode) {
 
 // ── Mode selector & copy trading controls ──────────────────────────────────
 
-async function loadCopyTradingConfig() {
-  let cfg;
-  try { cfg = await fetchJSON(`${API}/copytrading/config`); } catch { return; }
-
-  // If the user toggled to Copy Trading but hasn't clicked Apply yet, keep
-  // showing the copy-trading input UI instead of snapping back to the DB state.
-  if (!_pendingCopyMode) {
-    _copyTradingEnabled = !!cfg.enabled;
-  }
-
+function updateCopyTradingUI(enabled, trader_id) {
   const inputWrap = document.getElementById('copy-trader-input-wrap');
   const idInput = document.getElementById('copy-trader-id');
   const statusEl = document.getElementById('copy-trading-status');
@@ -652,21 +675,18 @@ async function loadCopyTradingConfig() {
 
   // Sync toggle buttons
   if (btnStrategy && btnCopy) {
-    btnStrategy.classList.toggle('mode-btn--active', !_copyTradingEnabled);
-    btnCopy.classList.toggle('mode-btn--active', _copyTradingEnabled);
-    btnCopy.classList.toggle('mode-btn--copy', _copyTradingEnabled);
+    btnStrategy.classList.toggle('mode-btn--active', !enabled);
+    btnCopy.classList.toggle('mode-btn--active', enabled);
+    btnCopy.classList.toggle('mode-btn--copy', enabled);
   }
 
-  if (inputWrap) inputWrap.classList.toggle('hidden', !_copyTradingEnabled);
-  if (idInput && cfg.trader_id) idInput.value = cfg.trader_id;
+  if (inputWrap) inputWrap.classList.toggle('hidden', !enabled);
+  if (idInput && trader_id) idInput.value = trader_id;
   if (statusEl) {
-    if (_copyTradingEnabled && cfg.enabled && cfg.trader_id) {
-      statusEl.textContent = `Mirroring: ${cfg.trader_id}`;
+    if (enabled && trader_id) {
+      statusEl.textContent = `Mirroring: ${trader_id}`;
       statusEl.className = 'copy-trading-status text-purple';
-    } else if (_copyTradingEnabled && _pendingCopyMode) {
-      statusEl.textContent = 'Copy trading selected \u2013 enter a trader ID and click Apply';
-      statusEl.className = 'copy-trading-status text-gold';
-    } else if (_copyTradingEnabled) {
+    } else if (enabled) {
       statusEl.textContent = 'Copy trading on \u2013 enter a trader ID';
       statusEl.className = 'copy-trading-status text-gold';
     } else {
@@ -676,6 +696,17 @@ async function loadCopyTradingConfig() {
   }
 }
 
+async function loadCopyTradingConfig() {
+  // Don't override local UI while the user is entering a trader ID
+  if (_copyTradingPendingApply) return;
+
+  let cfg;
+  try { cfg = await fetchJSON(`${API}/copytrading/config`); } catch { return; }
+
+  _copyTradingEnabled = !!cfg.enabled;
+  updateCopyTradingUI(_copyTradingEnabled, cfg.trader_id);
+}
+
 async function switchMode(mode) {
   if (mode === 'strategy' && !_copyTradingEnabled) return;
   if (mode === 'copy' && _copyTradingEnabled) return;
@@ -683,9 +714,9 @@ async function switchMode(mode) {
 
   if (mode === 'strategy') {
     // Disable copy trading immediately
-    _pendingCopyMode = false;
+    _copyTradingPendingApply = false;
     try {
-      const r = await fetch(`${API}/copytrading/config`, {
+      const r = await apiFetch(`${API}/copytrading/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: false, trader_id: '' }),
@@ -693,15 +724,17 @@ async function switchMode(mode) {
       const data = await r.json();
       if (!data.ok) { alert(`Error switching mode: ${data.message}`); return; }
     } catch (e) { alert(`Could not save mode: ${e.message}`); return; }
+    await refreshAll();
+    return;
   }
 
-  if (mode === 'copy') {
-    // Show the copy trading UI; user still needs to enter trader ID and click Apply.
-    _pendingCopyMode = true;
-    _copyTradingEnabled = true;
-  }
-
-  await refreshAll();
+  // mode === 'copy': show the copy trading UI without saving to the backend yet.
+  // (The backend requires a non-empty trader_id before it will accept enabled=true,
+  // so we update the UI locally and wait for the user to enter an ID and click Apply.)
+  _copyTradingEnabled = true;
+  _copyTradingPendingApply = true;
+  const idInput = document.getElementById('copy-trader-id');
+  updateCopyTradingUI(true, idInput ? idInput.value.trim() : '');
 }
 
 async function saveCopyTradingConfig() {
@@ -712,16 +745,16 @@ async function saveCopyTradingConfig() {
   if (!trader_id) { alert('Enter a Trader ID before clicking Apply.'); return; }
 
   try {
-    const r = await fetch(`${API}/copytrading/config`, {
+    const r = await apiFetch(`${API}/copytrading/config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: true, trader_id }),
     });
     const data = await r.json();
-    if (!data.ok) { alert(`Copy trading config error: ${data.message}`); return; }
-    _pendingCopyMode = false;   // Applied – real state is now in the DB
+    if (!data.ok) { _copyTradingPendingApply = false; alert(`Copy trading config error: ${data.message}`); return; }
     await refreshAll();
-  } catch (e) { alert(`Could not save copy trading config: ${e.message}`); }
+    _copyTradingPendingApply = false;
+  } catch (e) { _copyTradingPendingApply = false; alert(`Could not save copy trading config: ${e.message}`); }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────

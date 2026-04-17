@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.7.6
+- Fix Live Symbol Status collapse button CSS specificity bug
+
+## 1.7.5
+- Address code review feedback: fix import alias, test isolation, and INSERT OR IGNORE
+- Fix import bugs in app.py and add comprehensive tests for 100% coverage
+- Initial analysis - identify code issues and coverage gaps
+
+## 1.7.4
+- Address review: clear _copyTradingPendingApply on error and after refreshAll
+- Fix copy trading dialog hidden by polling and equity not updating on mode switch
+
+## 1.7.3
+- feat: add exchange LED indicator to frontend header
+- fix: refresh equity immediately when switching trading mode
+
+## 1.7.2
+- fix: address code review - validate version format, guard CHANGELOG newline, improve git error messages
+- feat: add auto-version-bump workflow on merge to main
+- fix: seed real-trading equity on bot start after mode switch
+
+## 1.7.1
+- Fix **Copy Trading toggle button doing nothing** — clicking "Copy Trading" in the strategy selector had no visible effect; `switchMode('copy')` set the local flag then called `refreshAll()` which re-fetched the server config (still `enabled: false`) and immediately overwrote the flag; extracted `updateCopyTradingUI()` helper and updated the UI directly without a server round-trip so the button, trader-ID input and status text now respond instantly
+
 ## 1.7.0
 - Add **Paper / Real Trading mode toggle** in the dashboard header — switch between `papertrading` and `realtrading` at runtime without restarting the add-on (bots must be stopped first)
 - New API endpoints: `GET /api/trading/mode` and `POST /api/trading/mode`

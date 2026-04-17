@@ -18,10 +18,10 @@ import pandas as pd
 # Prefer package-relative imports when running as `python -m backend.app`.
 # Keep absolute fallback for direct-module contexts used by tests and some tools.
 try:
-    from . import config
-    from . import database as db
-    from .exchange import BloFinClient
-    from .strategy import (
+    from . import config  # pragma: no cover
+    from . import database as db  # pragma: no cover
+    from .exchange import BloFinClient  # pragma: no cover
+    from .strategy import (  # pragma: no cover
         Signal,
         calculate_position_size,
         calculate_sl_tp,
@@ -108,6 +108,11 @@ class TradingBot:
         # before the first trading tick completes (which can take up to 15 min).
         if self.paper_trading:
             db.update_bot_status(symbol=self.symbol, equity=self._paper_equity())
+        else:
+            # For real trading, fetch the current exchange balance so the
+            # dashboard is not stuck showing a stale paper-trading equity after
+            # a mode switch.
+            self._refresh_equity_after_close()
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
         self._price_thread = threading.Thread(target=self._price_sync_loop, daemon=True)
