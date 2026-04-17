@@ -712,7 +712,10 @@ async function saveCopyTradingConfig() {
     if (!data.ok) { alert(`Copy trading config error: ${data.message}`); return; }
     _copyTradingPending = false;
     await refreshAll();
-  } catch (e) { alert(`Could not save copy trading config: ${e.message}`); }
+  } catch (e) {
+    _copyTradingPending = false;
+    alert(`Could not save copy trading config: ${e.message}`);
+  }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
