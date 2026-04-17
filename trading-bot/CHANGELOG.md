@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.7.5
+- Hide Live Symbol Status, Strategy Parameters & Market Context panels when copy trading is active and bot is running; show a Copy Trading – Open Positions table with live unrealised PnL instead
+
 ## 1.7.4
 - Address review: clear _copyTradingPendingApply on error and after refreshAll
 - Fix copy trading dialog hidden by polling and equity not updating on mode switch
