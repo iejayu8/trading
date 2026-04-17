@@ -735,10 +735,10 @@ async function saveCopyTradingConfig() {
       body: JSON.stringify({ enabled: true, trader_id }),
     });
     const data = await r.json();
-    if (!data.ok) { alert(`Copy trading config error: ${data.message}`); return; }
-    _copyTradingPendingApply = false;
+    if (!data.ok) { _copyTradingPendingApply = false; alert(`Copy trading config error: ${data.message}`); return; }
     await refreshAll();
-  } catch (e) { alert(`Could not save copy trading config: ${e.message}`); }
+    _copyTradingPendingApply = false;
+  } catch (e) { _copyTradingPendingApply = false; alert(`Could not save copy trading config: ${e.message}`); }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
