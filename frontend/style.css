@@ -374,7 +374,7 @@ main {
 }
 
 /* ── All-symbols live status ─────────────────────────────────────────────── */
-#all-symbols-status {
+#all-symbols-status:not(.collapsed) {
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -558,9 +558,14 @@ main {
   border-right: none;
 }
 
-.mode-btn:hover {
+.mode-btn:hover:not(:disabled) {
   color: var(--text);
   background: var(--surface);
+}
+
+.mode-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .mode-btn--active {
@@ -592,6 +597,11 @@ main {
 
 .copy-trader-input:focus {
   border-color: #a371f7;
+}
+
+.copy-trader-input:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .copy-trading-status {

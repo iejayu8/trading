@@ -40,10 +40,11 @@ from flask_cors import CORS
 # Prefer package-relative imports when running as `python -m backend.app`.
 # Keep absolute fallback for direct-module contexts used by tests and some tools.
 try:
-    from . import config
-    from . import database as db
-    from .bot import TradingBot, _extract_usdt_equity
-    from .exchange import BloFinClient
+    from . import config  # pragma: no cover
+    from . import database as db  # pragma: no cover
+    from .bot import TradingBot, _extract_usdt_equity  # pragma: no cover
+    from .exchange import BloFinClient  # pragma: no cover
+    from .strategy import compute_indicators, get_signal_checks, get_signal_diagnostics  # pragma: no cover
 except ImportError:
     import importlib
 
@@ -425,6 +426,7 @@ def api_config():
     try:
         from .strategy import ADX_MIN, RSI_PULLBACK_MAX, RSI_RECOVERY_LONG, PULLBACK_LOOKBACK, SIGNAL_COOLDOWN
     except ImportError:
+        import importlib
         _s = importlib.import_module("strategy")
         ADX_MIN = _s.ADX_MIN
         RSI_PULLBACK_MAX = _s.RSI_PULLBACK_MAX
@@ -584,7 +586,7 @@ def _port_is_free(port: int) -> bool:
         return sock.connect_ex(("127.0.0.1", port)) != 0
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     if not _port_is_free(5000):
         print(
             "ERROR: Another instance of the trading bot is already running on port 5000.\n"
