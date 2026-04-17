@@ -374,7 +374,7 @@ main {
 }
 
 /* ── All-symbols live status ─────────────────────────────────────────────── */
-#all-symbols-status {
+#all-symbols-status:not(.collapsed) {
   display: flex;
   flex-direction: column;
   gap: 0;
