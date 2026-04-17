@@ -42,15 +42,16 @@ from flask_cors import CORS
 try:
     from . import config
     from . import database as db
-    from .bot import TradingBot
+    from .bot import TradingBot, _extract_usdt_equity
     from .exchange import BloFinClient
-    from .strategy import compute_indicators, get_signal_checks, get_signal_diagnostics
 except ImportError:
     import importlib
 
     config = importlib.import_module("config")
     db = importlib.import_module("database")
-    TradingBot = importlib.import_module("bot").TradingBot
+    _bot_module = importlib.import_module("bot")
+    TradingBot = _bot_module.TradingBot
+    _extract_usdt_equity = _bot_module._extract_usdt_equity
     BloFinClient = importlib.import_module("exchange").BloFinClient
     _strategy = importlib.import_module("strategy")
     compute_indicators = _strategy.compute_indicators
@@ -334,6 +335,43 @@ def api_stop():
     return jsonify({"ok": True, "message": f"Stopped bots: {', '.join(stopped)}"})
 
 
+def _refresh_equity_on_mode_switch(new_mode: str) -> None:
+    """Refresh equity in bot_status for every symbol right after a mode switch.
+
+    For real trading: fetches the live USDT balance from the exchange once and
+    applies it to all symbols so the dashboard is never stuck on a stale value.
+    For paper trading: recalculates from closed-trade PnL stored in the DB.
+    Failures are logged and silently swallowed – the next bot tick will correct
+    the value anyway.
+    """
+    real_equity = None
+    if new_mode == "realtrading":
+        try:
+            client = BloFinClient()
+            balance_data = client.get_balance()
+            real_equity = _extract_usdt_equity(balance_data)
+        except Exception as exc:  # noqa: BLE001
+            db.log_event(
+                f"Could not fetch real balance on mode switch: {exc}",
+                level="WARNING",
+            )
+
+    for sym in config.SUPPORTED_SYMBOLS:
+        try:
+            if new_mode == "papertrading":
+                stats = db.get_trade_stats(sym)
+                closed_pnl = float(stats.get("total_pnl") or 0)
+                equity = config.PAPER_START_EQUITY + closed_pnl
+                db.update_bot_status(symbol=sym, equity=equity)
+            elif real_equity is not None:
+                db.update_bot_status(symbol=sym, equity=real_equity)
+        except Exception as exc:  # noqa: BLE001
+            db.log_event(
+                f"Could not update equity for {sym} on mode switch: {exc}",
+                level="WARNING",
+            )
+
+
 # ── Trading mode ──────────────────────────────────────────────────────────────
 
 @app.get("/api/trading/mode")
@@ -367,6 +405,9 @@ def api_trading_mode_set():
     # Recreate bot instances so they pick up the new mode on next start.
     _bots.clear()
     db.log_event(f"Trading mode changed from {old_mode} to {new_mode}")
+    # Immediately refresh equity for all symbols so the dashboard shows the
+    # correct balance without waiting for the next bot tick.
+    _refresh_equity_on_mode_switch(new_mode)
     return jsonify({"ok": True, "mode": new_mode})
 
 

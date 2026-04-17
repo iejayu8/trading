@@ -162,8 +162,35 @@ function togglePanel(bodyId, btnId) {
 
 // ── Fetch helpers ──────────────────────────────────────────────────────────
 
+/** Counter of in-flight API requests. Controls the exchange LED. */
+let _pendingRequests = 0;
+
+function _updateExchangeLed() {
+  const el = document.getElementById('exchange-indicator');
+  if (!el) return;
+  if (_pendingRequests > 0) {
+    el.className = 'indicator indicator--active';
+    el.title = `Exchange requests: ${_pendingRequests} in flight`;
+  } else {
+    el.className = 'indicator indicator--idle';
+    el.title = 'Exchange requests';
+  }
+}
+
+/** Drop-in replacement for fetch() that lights the exchange LED while active. */
+async function apiFetch(url, opts) {
+  _pendingRequests++;
+  _updateExchangeLed();
+  try {
+    return await fetch(url, opts);
+  } finally {
+    _pendingRequests--;
+    _updateExchangeLed();
+  }
+}
+
 async function fetchJSON(url) {
-  const resp = await fetch(url);
+  const resp = await apiFetch(url);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${url}`);
   return resp.json();
 }
@@ -498,7 +525,7 @@ async function refreshTradeHistory() {
 async function closeTrade(tradeId, symbol) {
   if (!confirm(`Close trade #${tradeId} (${symbol}) at current market price?`)) return;
   try {
-    const res = await fetch(`${API}/trades/${tradeId}/close`, { method: 'POST' });
+    const res = await apiFetch(`${API}/trades/${tradeId}/close`, { method: 'POST' });
     const data = await res.json();
     if (data.ok) {
       await refreshTradeHistory();
@@ -547,7 +574,7 @@ async function refreshLogs() {
 
 async function startBot() {
   try {
-    const r = await fetch(`${API}/bot/start`, { method: 'POST' });
+    const r = await apiFetch(`${API}/bot/start`, { method: 'POST' });
     const data = await r.json();
     if (!data.ok) alert(data.message);
     refreshAll();
@@ -556,7 +583,7 @@ async function startBot() {
 
 async function stopBot() {
   try {
-    const r = await fetch(`${API}/bot/stop`, { method: 'POST' });
+    const r = await apiFetch(`${API}/bot/stop`, { method: 'POST' });
     const data = await r.json();
     if (!data.ok) alert(data.message);
     refreshAll();
@@ -566,7 +593,7 @@ async function stopBot() {
 async function clearLogs() {
   if (!confirm('Clear all activity log entries?')) return;
   try {
-    const r = await fetch(`${API}/logs/clear`, { method: 'POST' });
+    const r = await apiFetch(`${API}/logs/clear`, { method: 'POST' });
     const data = await r.json();
     if (!r.ok || !data.ok) { alert(data.message || 'Could not clear log'); return; }
     await refreshLogs();
@@ -576,7 +603,7 @@ async function clearLogs() {
 async function resetDatabase() {
   if (!confirm('Reset all statistics?\n\nThis will permanently delete all trade history, activity logs, and bot status data. This action cannot be undone.\n\nMake sure all bots are stopped before resetting.')) return;
   try {
-    const r = await fetch(`${API}/database/reset`, { method: 'POST' });
+    const r = await apiFetch(`${API}/database/reset`, { method: 'POST' });
     const data = await r.json();
     if (!r.ok || !data.ok) { alert(data.message || 'Could not reset database'); return; }
     await refreshAll();
@@ -608,11 +635,11 @@ async function switchTradingMode(mode) {
 
   // Stop bots first
   try {
-    await fetch(`${API}/bot/stop`, { method: 'POST' });
+    await apiFetch(`${API}/bot/stop`, { method: 'POST' });
   } catch { /* bots may already be stopped */ }
 
   try {
-    const r = await fetch(`${API}/trading/mode`, {
+    const r = await apiFetch(`${API}/trading/mode`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode }),
@@ -671,7 +698,7 @@ async function switchMode(mode) {
   if (mode === 'strategy') {
     // Disable copy trading immediately
     try {
-      const r = await fetch(`${API}/copytrading/config`, {
+      const r = await apiFetch(`${API}/copytrading/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: false, trader_id: '' }),
@@ -696,7 +723,7 @@ async function saveCopyTradingConfig() {
   const trader_id = idInput ? idInput.value.trim() : '';
 
   try {
-    const r = await fetch(`${API}/copytrading/config`, {
+    const r = await apiFetch(`${API}/copytrading/config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: true, trader_id }),
