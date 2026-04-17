@@ -108,6 +108,11 @@ class TradingBot:
         # before the first trading tick completes (which can take up to 15 min).
         if self.paper_trading:
             db.update_bot_status(symbol=self.symbol, equity=self._paper_equity())
+        else:
+            # For real trading, fetch the current exchange balance so the
+            # dashboard is not stuck showing a stale paper-trading equity after
+            # a mode switch.
+            self._refresh_equity_after_close()
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
         self._price_thread = threading.Thread(target=self._price_sync_loop, daemon=True)
