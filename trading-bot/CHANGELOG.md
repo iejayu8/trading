@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.7.15
+- feat: 5-second copy trading sync interval with lightweight _tick_copy_only
+
 ## 1.7.14
 - docs: clarify first_equity return value in docstring
 - fix: update equity from exchange when realtrading mode is activated
