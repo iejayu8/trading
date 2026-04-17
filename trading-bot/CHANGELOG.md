@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.10
+- fix: clear _copyTradingPending on save error to prevent infinite poll block
+- fix: prevent poll from hiding copy trading input before user applies
+
 ## 1.7.9
 - Fix XSS: escape t.id and t.size, use array accumulator for innerHTML
 - Disable strategy sections and show open positions when copy trading is active and bot is running
