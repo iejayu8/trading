@@ -154,6 +154,9 @@ function togglePanel(bodyId, btnId) {
   const body = document.getElementById(bodyId);
   const btn  = document.getElementById(btnId);
   const collapsed = body.classList.toggle('collapsed');
+  // Belt-and-suspenders: set inline display so collapse works even if
+  // external styles (e.g. HA ingress) override the CSS class rule.
+  body.style.display = collapsed ? 'none' : '';
   btn.textContent = collapsed ? '▼' : '▲';
   btn.title = collapsed ? 'Expand' : 'Collapse';
   // Resize chart canvas after expanding so Chart.js recalculates dimensions

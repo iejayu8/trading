@@ -1,9 +1,16 @@
 # Changelog
 
-## 1.7.11
+## 1.7.13
 - fix: update equity (USDT) from exchange as soon as realtrading mode is activated
 - Equity is now refreshed even when re-selecting the already-active mode
 - Mode switch API response includes the equity value for immediate frontend display
+
+## 1.7.12
+- test: add 22 tests for mode-specific DB isolation; sync trading-bot/
+- feat: mode-specific database separation for 4 operating modes
+
+## 1.7.11
+- Fix Live Symbol Status collapse with !important CSS and inline style fallback
 
 ## 1.7.10
 - fix: clear _copyTradingPending on save error to prevent infinite poll block

@@ -57,20 +57,32 @@ import database
 @pytest.fixture()
 def app_client(tmp_path):
     """Flask test client with an isolated temp DB and clean bot registry."""
+    # Point mode-specific DB path resolution at the temp directory so that
+    # any switch_db() calls during the test create files here, not in the
+    # real backend directory.
+    old_dir, old_stem = database._DB_DIR, database._DB_STEM
+    database._DB_DIR = tmp_path
+    database._DB_STEM = "test_frontend"
     database.DB_PATH = tmp_path / "test_frontend.db"
     database.init_db()
 
     import app as flask_app
+    import config as _config
 
     # Always start each test with an empty bot registry.
     flask_app._bots.clear()
     flask_app.app.config["TESTING"] = True
+
+    old_copy = _config.COPY_TRADING_ENABLED
 
     with flask_app.app.test_client() as client:
         yield client
 
     # Ensure bot registry is clean after each test.
     flask_app._bots.clear()
+    # Restore module-level DB path components and copy-trading flag.
+    database._DB_DIR, database._DB_STEM = old_dir, old_stem
+    _config.COPY_TRADING_ENABLED = old_copy
 
 
 @pytest.fixture()
@@ -1444,21 +1456,29 @@ class TestTradingMode:
 
     def test_switch_to_paper_recalculates_equity(self, app_client):
         """Switching to papertrading should recalculate equity from
-        PAPER_START_EQUITY + closed PnL."""
+        PAPER_START_EQUITY + closed PnL stored in the paper-mode database."""
         import app as flask_app
         import config as _config
 
         old_mode = _config.TRADING_MODE
-        _config.TRADING_MODE = "realtrading"
-        flask_app._bots.clear()
         sym = _config.SUPPORTED_SYMBOLS[0]
 
-        # Create a closed trade to generate PnL
+        # Start in papertrading and seed a closed trade so the paper DB
+        # accumulates PnL that the equity recalculation can find.
+        _config.TRADING_MODE = "papertrading"
+        database.switch_db("papertrading", _config.COPY_TRADING_ENABLED)
+        flask_app._bots.clear()
+
         tid = database.open_trade(
             symbol=sym, direction="LONG", entry_price=40000.0,
             size=0.001, sl_price=39000.0, tp_price=41600.0, leverage=5,
         )
         database.close_trade(tid, exit_price=41600.0, pnl=50.0)
+
+        # Switch away to realtrading, then back to papertrading.
+        _config.TRADING_MODE = "realtrading"
+        database.switch_db("realtrading", _config.COPY_TRADING_ENABLED)
+        flask_app._bots.clear()
 
         data = app_client.post(
             "/api/trading/mode",

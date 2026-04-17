@@ -72,6 +72,8 @@ CORS(app)
 
 # Ensure DB tables exist regardless of how Flask is started (subprocess, embedded,
 # or `flask run`).  init_db() is idempotent so calling it multiple times is safe.
+# DB_PATH is already set to the correct mode-specific path by database.py's
+# module-level code (derived from config.TRADING_MODE and COPY_TRADING_ENABLED).
 db.init_db()
 # Clear stale running=1 flags left by any previous (crashed/killed) server process.
 # No bot threads survive a server restart, so the DB must reflect that.
@@ -431,6 +433,9 @@ def api_trading_mode_set():
     config.TRADING_MODE = new_mode
     # Recreate bot instances so they pick up the new mode on next start.
     _bots.clear()
+    # Switch to the mode-specific database so all subsequent reads/writes
+    # target the correct data store.
+    db.switch_db(new_mode, config.COPY_TRADING_ENABLED)
     db.log_event(f"Trading mode changed from {old_mode} to {new_mode}")
     # Immediately refresh equity for all symbols so the dashboard shows the
     # correct balance without waiting for the next bot tick.
@@ -587,6 +592,10 @@ def api_copytrading_set():
 
     Expects JSON body: ``{"enabled": true/false, "trader_id": "..."}``
     When *enabled* is ``true``, *trader_id* must be a non-empty string.
+
+    If the copy-trading toggle changes, the active database is switched
+    so each mode combination keeps its own isolated history.  All bots
+    must be stopped before toggling.
     """
     body = request.get_json(silent=True) or {}
     enabled = bool(body.get("enabled", False))
@@ -594,6 +603,17 @@ def api_copytrading_set():
 
     if enabled and not trader_id:
         return jsonify({"ok": False, "message": "trader_id is required when copy trading is enabled"}), 400
+
+    # When the copy-trading state changes, switch to the corresponding
+    # database so data stays isolated per mode.
+    toggling = enabled != config.COPY_TRADING_ENABLED
+    if toggling:
+        any_running = any(b.is_running for b in _bots.values())
+        if any_running:
+            return jsonify({"ok": False, "message": "Stop all bots before switching strategy mode"}), 409
+        config.COPY_TRADING_ENABLED = enabled
+        _bots.clear()
+        db.switch_db(config.TRADING_MODE, enabled)
 
     db.set_copy_trading_config(enabled=enabled, trader_id=trader_id)
     db.log_event(
@@ -619,7 +639,7 @@ if __name__ == "__main__":  # pragma: no cover
             file=sys.stderr,
         )
         sys.exit(1)
-    db.init_db()
+    db.switch_db(config.TRADING_MODE, config.COPY_TRADING_ENABLED)
     db.log_event("Server started")
     # Auto-start all symbol bots so the bot runs immediately on addon init.
     for _sym in config.SUPPORTED_SYMBOLS:

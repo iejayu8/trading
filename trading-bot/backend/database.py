@@ -6,6 +6,19 @@ Tables
 trades       – all executed (simulated or live) trades
 bot_logs     – timestamped bot activity log
 bot_status   – singleton row tracking current bot state
+
+Database separation
+───────────────────
+The application supports four operating modes (papertrading/realtrading ×
+custom-strategy/copy-trading).  Each mode stores its data in a **separate**
+SQLite file so that switching modes presents the user with the correct
+historical data.  The file names follow the pattern::
+
+    <stem>_<paper|real>_<custom|copy>.db
+
+where *<stem>* is derived from the ``TRADING_DB_PATH`` environment variable
+(default: ``trading_bot``).  Call :func:`switch_db` to change the active
+database at runtime.
 """
 
 from __future__ import annotations
@@ -16,7 +29,37 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-DB_PATH = Path(os.getenv("TRADING_DB_PATH", str(Path(__file__).parent / "trading_bot.db")))
+# Base path from which mode-specific DB names are derived.
+_DB_BASE = Path(os.getenv("TRADING_DB_PATH", str(Path(__file__).parent / "trading_bot.db")))
+_DB_DIR = _DB_BASE.parent
+_DB_STEM = _DB_BASE.stem
+
+
+def _mode_db_path(trading_mode: str, copy_trading: bool) -> Path:
+    """Return the database file path for a specific operating-mode combination.
+
+    >>> _mode_db_path("papertrading", False)
+    PosixPath('.../trading_bot_paper_custom.db')
+    >>> _mode_db_path("realtrading", True)
+    PosixPath('.../trading_bot_real_copy.db')
+    """
+    mode = "paper" if trading_mode == "papertrading" else "real"
+    strategy = "copy" if copy_trading else "custom"
+    return _DB_DIR / f"{_DB_STEM}_{mode}_{strategy}.db"
+
+
+# Compute the initial DB_PATH from config defaults.  Tests may override
+# DB_PATH directly (before calling init_db()) to use a temp directory.
+try:
+    from . import config as _startup_config  # pragma: no cover
+except ImportError:
+    import importlib as _importlib
+    _startup_config = _importlib.import_module("config")
+
+DB_PATH = _mode_db_path(
+    getattr(_startup_config, "TRADING_MODE", "realtrading"),
+    getattr(_startup_config, "COPY_TRADING_ENABLED", False),
+)
 
 
 @contextlib.contextmanager
@@ -366,6 +409,19 @@ def reset_database() -> None:
             DELETE FROM bot_status;
             """
         )
+
+
+def switch_db(trading_mode: str, copy_trading: bool) -> None:
+    """Point :data:`DB_PATH` at the database for the given operating mode.
+
+    Creates tables if they don't exist yet and resets stale ``running``
+    flags.  Call this whenever the trading mode or copy-trading toggle
+    changes at runtime.
+    """
+    global DB_PATH
+    DB_PATH = _mode_db_path(trading_mode, copy_trading)
+    init_db()
+    reset_running_flags()
 
 
 # ── Copy trading configuration ────────────────────────────────────────────────
