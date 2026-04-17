@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.12
+- test: add 22 tests for mode-specific DB isolation; sync trading-bot/
+- feat: mode-specific database separation for 4 operating modes
+
 ## 1.7.11
 - Fix Live Symbol Status collapse with !important CSS and inline style fallback
 
