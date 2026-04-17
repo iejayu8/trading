@@ -3,6 +3,8 @@ bot.py – Core trading bot engine.
 
 The bot runs as a background thread, waking every 15 minutes
 (aligned to the candle close) to evaluate signals and manage positions.
+When copy trading is active, the loop switches to a fast 5-second poll
+that mirrors the lead trader's positions without fetching candles.
 """
 
 from __future__ import annotations
@@ -50,6 +52,7 @@ class TradingBot:
     """15-minute candle trading bot for BloFin futures."""
 
     CANDLE_SECONDS = 15 * 60  # 900 s
+    COPY_SYNC_SECONDS = 5  # fast poll when copy trading is active
     PRICE_SYNC_SECONDS = 5 * 60  # 300 s – ticker refresh between candle ticks
     MAX_API_RETRIES = 3
     RETRY_BASE_SECONDS = 0.7
@@ -141,21 +144,94 @@ class TradingBot:
     def _run_loop(self) -> None:
         db.log_event("Trading loop started")
         while self._running:
-            try:
-                self._tick()
-            except Exception as exc:  # noqa: BLE001
-                db.log_event(f"Error in tick: {exc}", level="ERROR")
+            # Re-read copy trading flag so mode switches take effect immediately.
+            ct = db.get_copy_trading_config()
+            copy_active = ct.get("enabled", False) and bool(ct.get("trader_id", ""))
 
-            # Sleep until the next 15-min candle boundary (+ 5 s buffer)
-            now = time.time()
-            next_candle = (
-                (now // self.CANDLE_SECONDS + 1) * self.CANDLE_SECONDS + 5
-            )
-            sleep_secs = max(next_candle - time.time(), 1)
-            if self._stop_event.wait(timeout=sleep_secs):
-                break
+            if copy_active:
+                # Fast 5-second polling – lightweight check that skips candle
+                # analysis and only mirrors the lead trader's positions.
+                try:
+                    self._tick_copy_only()
+                except Exception as exc:  # noqa: BLE001
+                    db.log_event(f"Error in copy tick: {exc}", level="ERROR")
+
+                if self._stop_event.wait(timeout=self.COPY_SYNC_SECONDS):
+                    break
+            else:
+                try:
+                    self._tick()
+                except Exception as exc:  # noqa: BLE001
+                    db.log_event(f"Error in tick: {exc}", level="ERROR")
+
+                # Sleep until the next 15-min candle boundary (+ 5 s buffer)
+                now = time.time()
+                next_candle = (
+                    (now // self.CANDLE_SECONDS + 1) * self.CANDLE_SECONDS + 5
+                )
+                sleep_secs = max(next_candle - time.time(), 1)
+                if self._stop_event.wait(timeout=sleep_secs):
+                    break
 
         db.log_event("Trading loop exited")
+
+    def _tick_copy_only(self) -> None:
+        """Lightweight copy-trading tick that runs every few seconds.
+
+        Skips OHLCV fetching and indicator computation – only fetches the
+        current price via the ticker API, refreshes equity, and mirrors the
+        lead trader's positions.  This keeps the reaction latency down to
+        ``COPY_SYNC_SECONDS`` instead of the 15-minute candle interval.
+        """
+        # ── Price via ticker (fast) ──────────────────────────────────────────
+        try:
+            ticker = self._call_with_retries(
+                self._client.get_ticker,
+                self.symbol,
+                label="copy_ticker",
+            )
+            raw_price = ticker.get("last") or ticker.get("lastPr")
+            if raw_price is None:
+                db.log_event("[COPY] Ticker returned no price", level="WARNING")
+                return
+            last_price = float(raw_price)
+        except Exception as exc:
+            db.log_event(f"[COPY] Ticker fetch failed: {exc}", level="WARNING")
+            return
+
+        db.update_bot_status(symbol=self.symbol, last_price=last_price)
+
+        # ── Equity ───────────────────────────────────────────────────────────
+        if self.paper_trading:
+            equity = self._paper_equity(current_price=last_price)
+        else:
+            try:
+                balance_data = self._call_with_retries(
+                    self._client.get_balance,
+                    label="copy_get_balance",
+                )
+                equity = _extract_usdt_equity(balance_data)
+            except Exception:
+                equity = None
+
+        if equity is not None:
+            db.update_bot_status(symbol=self.symbol, equity=equity)
+
+        # ── Open trades & exchange position ──────────────────────────────────
+        open_trades = db.get_open_trades(symbol=self.symbol)
+        exchange_has_pos = False if self.paper_trading else self._has_exchange_open_position()
+        if not self.paper_trading:
+            open_trades = self._reconcile_local_open_trades(
+                open_trades, exchange_has_pos, last_price,
+            )
+
+        # ── Re-read copy config (supports runtime toggling) ─────────────────
+        ct = db.get_copy_trading_config()
+        self._copy_trading = ct.get("enabled", False)
+        self._copy_trader_id = ct.get("trader_id", "") or ""
+
+        if self._copy_trading and self._copy_trader_id:
+            self._tick_copy_trading(open_trades, exchange_has_pos, last_price, equity)
 
     def _price_sync_loop(self) -> None:
         """Lightweight loop that refreshes last_price every 5 minutes via ticker.

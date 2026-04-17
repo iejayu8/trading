@@ -459,3 +459,190 @@ class TestBotStartLoadsCopyConfig:
         bot.start()
         assert bot._copy_trading is False
         bot.stop()
+
+
+# ── COPY_SYNC_SECONDS constant ───────────────────────────────────────────────
+
+class TestCopySyncConstant:
+    def test_copy_sync_seconds_is_5(self):
+        assert TradingBot.COPY_SYNC_SECONDS == 5
+
+
+# ── _tick_copy_only ──────────────────────────────────────────────────────────
+
+class TestTickCopyOnly:
+    """Unit tests for the lightweight _tick_copy_only() method."""
+
+    def _make_bot(self, monkeypatch, paper=True):
+        monkeypatch.setattr(config, "TRADING_MODE", "papertrading" if paper else "realtrading")
+        monkeypatch.setattr(config, "PAPER_START_EQUITY", 10000.0)
+        bot = TradingBot(symbol="BTC-USDT")
+        db.set_copy_trading_config(enabled=True, trader_id="leader1")
+        bot._copy_trading = True
+        bot._copy_trader_id = "leader1"
+        return bot
+
+    def test_calls_tick_copy_trading(self, monkeypatch):
+        """_tick_copy_only fetches price via ticker and calls _tick_copy_trading."""
+        bot = self._make_bot(monkeypatch)
+        monkeypatch.setattr(bot._client, "get_ticker", lambda s: {"last": "50000"})
+
+        copy_calls = {"n": 0}
+
+        def fake_copy_tick(*args, **kwargs):
+            copy_calls["n"] += 1
+
+        monkeypatch.setattr(bot, "_tick_copy_trading", fake_copy_tick)
+        bot._tick_copy_only()
+
+        assert copy_calls["n"] == 1
+        status = db.get_bot_status("BTC-USDT")
+        assert float(status["last_price"]) == 50000.0
+
+    def test_updates_equity_paper(self, monkeypatch):
+        """Paper equity is refreshed during the copy-only tick."""
+        bot = self._make_bot(monkeypatch, paper=True)
+        monkeypatch.setattr(bot._client, "get_ticker", lambda s: {"last": "50000"})
+        monkeypatch.setattr(
+            bot._client, "get_copy_trader_positions", lambda tid: [],
+        )
+        bot._tick_copy_only()
+        status = db.get_bot_status("BTC-USDT")
+        assert status["equity"] is not None
+        assert float(status["equity"]) == 10000.0
+
+    def test_returns_early_on_ticker_failure(self, monkeypatch):
+        """If the ticker API fails, _tick_copy_only returns without crashing."""
+        bot = self._make_bot(monkeypatch)
+
+        def exploding_ticker(s):
+            raise RuntimeError("Network error")
+
+        monkeypatch.setattr(bot._client, "get_ticker", exploding_ticker)
+
+        copy_calls = {"n": 0}
+        monkeypatch.setattr(bot, "_tick_copy_trading", lambda *a, **k: copy_calls.update(n=copy_calls["n"] + 1))
+        bot._tick_copy_only()
+        assert copy_calls["n"] == 0  # not reached
+
+    def test_returns_early_on_no_price(self, monkeypatch):
+        """If ticker returns no price, _tick_copy_only logs a warning and returns."""
+        bot = self._make_bot(monkeypatch)
+        monkeypatch.setattr(bot._client, "get_ticker", lambda s: {})
+
+        copy_calls = {"n": 0}
+        monkeypatch.setattr(bot, "_tick_copy_trading", lambda *a, **k: copy_calls.update(n=copy_calls["n"] + 1))
+        bot._tick_copy_only()
+        assert copy_calls["n"] == 0
+
+    def test_skips_copy_if_disabled_at_runtime(self, monkeypatch):
+        """If copy trading is disabled between loop iterations, skip mirroring."""
+        bot = self._make_bot(monkeypatch)
+        monkeypatch.setattr(bot._client, "get_ticker", lambda s: {"last": "50000"})
+        # Disable copy trading in DB after bot was created
+        db.set_copy_trading_config(enabled=False, trader_id="")
+
+        copy_calls = {"n": 0}
+        monkeypatch.setattr(bot, "_tick_copy_trading", lambda *a, **k: copy_calls.update(n=copy_calls["n"] + 1))
+        bot._tick_copy_only()
+        assert copy_calls["n"] == 0
+
+    def test_opens_trade_via_copy_only(self, monkeypatch):
+        """End-to-end: _tick_copy_only mirrors a new lead position."""
+        bot = self._make_bot(monkeypatch)
+        monkeypatch.setattr(bot._client, "get_ticker", lambda s: {"last": "50000"})
+        monkeypatch.setattr(
+            bot._client, "get_copy_trader_positions",
+            lambda tid: [{"instId": "BTC-USDT", "side": "long", "pos": "0.1"}],
+        )
+        bot._tick_copy_only()
+        open_trades = db.get_open_trades("BTC-USDT")
+        assert len(open_trades) == 1
+        assert open_trades[0]["direction"] == "LONG"
+
+
+# ── _run_loop uses fast polling for copy trading ─────────────────────────────
+
+class TestRunLoopCopyPolling:
+    """Verify _run_loop dispatches to _tick_copy_only with short sleep."""
+
+    def test_run_loop_calls_tick_copy_only_when_enabled(self, monkeypatch):
+        monkeypatch.setattr(config, "TRADING_MODE", "papertrading")
+        monkeypatch.setattr(config, "PAPER_START_EQUITY", 10000.0)
+        bot = TradingBot(symbol="BTC-USDT")
+
+        db.set_copy_trading_config(enabled=True, trader_id="leader1")
+
+        copy_only_calls = {"n": 0}
+        tick_calls = {"n": 0}
+
+        def fake_copy_only():
+            copy_only_calls["n"] += 1
+            bot._running = False  # stop after first iteration
+
+        def fake_tick():
+            tick_calls["n"] += 1
+            bot._running = False
+
+        monkeypatch.setattr(bot, "_tick_copy_only", fake_copy_only)
+        monkeypatch.setattr(bot, "_tick", fake_tick)
+        # Make stop_event.wait return True immediately so loop doesn't block.
+        monkeypatch.setattr(bot._stop_event, "wait", lambda timeout=None: True)
+
+        bot._running = True
+        bot._run_loop()
+
+        assert copy_only_calls["n"] == 1
+        assert tick_calls["n"] == 0
+
+    def test_run_loop_calls_tick_when_copy_disabled(self, monkeypatch):
+        monkeypatch.setattr(config, "TRADING_MODE", "papertrading")
+        monkeypatch.setattr(config, "PAPER_START_EQUITY", 10000.0)
+        bot = TradingBot(symbol="BTC-USDT")
+
+        db.set_copy_trading_config(enabled=False, trader_id="")
+
+        copy_only_calls = {"n": 0}
+        tick_calls = {"n": 0}
+
+        def fake_copy_only():
+            copy_only_calls["n"] += 1
+            bot._running = False
+
+        def fake_tick():
+            tick_calls["n"] += 1
+            bot._running = False
+
+        monkeypatch.setattr(bot, "_tick_copy_only", fake_copy_only)
+        monkeypatch.setattr(bot, "_tick", fake_tick)
+        monkeypatch.setattr(bot._stop_event, "wait", lambda timeout=None: True)
+
+        bot._running = True
+        bot._run_loop()
+
+        assert tick_calls["n"] == 1
+        assert copy_only_calls["n"] == 0
+
+    def test_run_loop_uses_copy_sync_seconds_timeout(self, monkeypatch):
+        """When copy trading, the stop_event.wait uses COPY_SYNC_SECONDS."""
+        monkeypatch.setattr(config, "TRADING_MODE", "papertrading")
+        monkeypatch.setattr(config, "PAPER_START_EQUITY", 10000.0)
+        bot = TradingBot(symbol="BTC-USDT")
+
+        db.set_copy_trading_config(enabled=True, trader_id="leader1")
+        monkeypatch.setattr(bot, "_tick_copy_only", lambda: None)
+
+        wait_timeouts = []
+        orig_wait = bot._stop_event.wait
+
+        def capture_wait(timeout=None):
+            wait_timeouts.append(timeout)
+            bot._running = False  # stop after first iteration
+            return True
+
+        monkeypatch.setattr(bot._stop_event, "wait", capture_wait)
+
+        bot._running = True
+        bot._run_loop()
+
+        assert wait_timeouts[0] == 5
