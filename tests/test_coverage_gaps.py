@@ -976,6 +976,9 @@ class TestAppCoverage:
     @pytest.fixture()
     def app_client(self, tmp_path):
         """Flask test client with isolated DB and clean bot registry."""
+        old_dir, old_stem = db._DB_DIR, db._DB_STEM
+        db._DB_DIR = tmp_path
+        db._DB_STEM = "test_coverage_app"
         db.DB_PATH = tmp_path / "test_coverage_app.db"
         db.init_db()
 
@@ -987,6 +990,7 @@ class TestAppCoverage:
             yield client, flask_app
 
         flask_app._bots.clear()
+        db._DB_DIR, db._DB_STEM = old_dir, old_stem
 
     def test_ingress_path_injection(self, app_client, tmp_path):
         """Cover ingress path injection for Home Assistant (lines 91-97)."""
@@ -1181,17 +1185,25 @@ class TestAppCoverage:
 class TestAppModeSwitch:
     @pytest.fixture()
     def app_client(self, tmp_path):
+        old_dir, old_stem = db._DB_DIR, db._DB_STEM
+        db._DB_DIR = tmp_path
+        db._DB_STEM = "test_mode"
         db.DB_PATH = tmp_path / "test_mode.db"
         db.init_db()
 
         import app as flask_app
+        import config as _config
         flask_app._bots.clear()
         flask_app.app.config["TESTING"] = True
+
+        old_copy = _config.COPY_TRADING_ENABLED
 
         with flask_app.app.test_client() as client:
             yield client, flask_app
 
         flask_app._bots.clear()
+        db._DB_DIR, db._DB_STEM = old_dir, old_stem
+        _config.COPY_TRADING_ENABLED = old_copy
 
     def test_mode_switch_equity_update_exception(self, app_client, monkeypatch):
         """Cover per-symbol equity update exception during mode switch (line 372-374)."""

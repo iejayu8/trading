@@ -40,10 +40,11 @@ from flask_cors import CORS
 # Prefer package-relative imports when running as `python -m backend.app`.
 # Keep absolute fallback for direct-module contexts used by tests and some tools.
 try:
-    from . import config
-    from . import database as db
-    from .bot import TradingBot, _extract_usdt_equity
-    from .exchange import BloFinClient
+    from . import config  # pragma: no cover
+    from . import database as db  # pragma: no cover
+    from .bot import TradingBot, _extract_usdt_equity  # pragma: no cover
+    from .exchange import BloFinClient  # pragma: no cover
+    from .strategy import compute_indicators, get_signal_checks, get_signal_diagnostics  # pragma: no cover
 except ImportError:
     import importlib
 
@@ -71,6 +72,8 @@ CORS(app)
 
 # Ensure DB tables exist regardless of how Flask is started (subprocess, embedded,
 # or `flask run`).  init_db() is idempotent so calling it multiple times is safe.
+# DB_PATH is already set to the correct mode-specific path by database.py's
+# module-level code (derived from config.TRADING_MODE and COPY_TRADING_ENABLED).
 db.init_db()
 # Clear stale running=1 flags left by any previous (crashed/killed) server process.
 # No bot threads survive a server restart, so the DB must reflect that.
@@ -408,6 +411,9 @@ def api_trading_mode_set():
     config.TRADING_MODE = new_mode
     # Recreate bot instances so they pick up the new mode on next start.
     _bots.clear()
+    # Switch to the mode-specific database so all subsequent reads/writes
+    # target the correct data store.
+    db.switch_db(new_mode, config.COPY_TRADING_ENABLED)
     db.log_event(f"Trading mode changed from {old_mode} to {new_mode}")
     # Immediately refresh equity for all symbols so the dashboard shows the
     # correct balance without waiting for the next bot tick.
@@ -425,6 +431,7 @@ def api_config():
     try:
         from .strategy import ADX_MIN, RSI_PULLBACK_MAX, RSI_RECOVERY_LONG, PULLBACK_LOOKBACK, SIGNAL_COOLDOWN
     except ImportError:
+        import importlib
         _s = importlib.import_module("strategy")
         ADX_MIN = _s.ADX_MIN
         RSI_PULLBACK_MAX = _s.RSI_PULLBACK_MAX
@@ -560,6 +567,10 @@ def api_copytrading_set():
 
     Expects JSON body: ``{"enabled": true/false, "trader_id": "..."}``
     When *enabled* is ``true``, *trader_id* must be a non-empty string.
+
+    If the copy-trading toggle changes, the active database is switched
+    so each mode combination keeps its own isolated history.  All bots
+    must be stopped before toggling.
     """
     body = request.get_json(silent=True) or {}
     enabled = bool(body.get("enabled", False))
@@ -567,6 +578,17 @@ def api_copytrading_set():
 
     if enabled and not trader_id:
         return jsonify({"ok": False, "message": "trader_id is required when copy trading is enabled"}), 400
+
+    # When the copy-trading state changes, switch to the corresponding
+    # database so data stays isolated per mode.
+    toggling = enabled != config.COPY_TRADING_ENABLED
+    if toggling:
+        any_running = any(b.is_running for b in _bots.values())
+        if any_running:
+            return jsonify({"ok": False, "message": "Stop all bots before switching strategy mode"}), 409
+        config.COPY_TRADING_ENABLED = enabled
+        _bots.clear()
+        db.switch_db(config.TRADING_MODE, enabled)
 
     db.set_copy_trading_config(enabled=enabled, trader_id=trader_id)
     db.log_event(
@@ -584,7 +606,7 @@ def _port_is_free(port: int) -> bool:
         return sock.connect_ex(("127.0.0.1", port)) != 0
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     if not _port_is_free(5000):
         print(
             "ERROR: Another instance of the trading bot is already running on port 5000.\n"
@@ -592,7 +614,7 @@ if __name__ == "__main__":
             file=sys.stderr,
         )
         sys.exit(1)
-    db.init_db()
+    db.switch_db(config.TRADING_MODE, config.COPY_TRADING_ENABLED)
     db.log_event("Server started")
     # Auto-start all symbol bots so the bot runs immediately on addon init.
     for _sym in config.SUPPORTED_SYMBOLS:

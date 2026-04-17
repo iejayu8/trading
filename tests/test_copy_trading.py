@@ -120,17 +120,25 @@ class TestCopyTradingDB:
 @pytest.fixture()
 def app_client(tmp_path):
     """Flask test client with isolated DB."""
+    old_dir, old_stem = db._DB_DIR, db._DB_STEM
+    db._DB_DIR = tmp_path
+    db._DB_STEM = "test_api_copy"
     db.DB_PATH = tmp_path / "test_api_copy.db"
     db.init_db()
 
     import app as flask_app
+    import config as _config
     flask_app._bots.clear()
     flask_app.app.config["TESTING"] = True
+
+    old_copy = _config.COPY_TRADING_ENABLED
 
     with flask_app.app.test_client() as client:
         yield client
 
     flask_app._bots.clear()
+    db._DB_DIR, db._DB_STEM = old_dir, old_stem
+    _config.COPY_TRADING_ENABLED = old_copy
 
 
 class TestCopyTradingAPI:
