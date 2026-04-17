@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.7.11
+- Fix Live Symbol Status collapse with !important CSS and inline style fallback
+
 ## 1.7.10
 - fix: clear _copyTradingPending on save error to prevent infinite poll block
 - fix: prevent poll from hiding copy trading input before user applies
