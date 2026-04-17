@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.7.7
+- Fix all 4 header mode buttons: proper backend integration, disable when bots running, fix copy trading toggle
+
 ## 1.7.6
 - Fix Live Symbol Status collapse button CSS specificity bug
 
