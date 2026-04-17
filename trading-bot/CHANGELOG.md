@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.9
+- Fix XSS: escape t.id and t.size, use array accumulator for innerHTML
+- Disable strategy sections and show open positions when copy trading is active and bot is running
+
 ## 1.7.8
 - Hide Live Symbol Status, Strategy Parameters & Market Context panels when copy trading is active and bot is running; show a Copy Trading – Open Positions table with live unrealised PnL instead
 
