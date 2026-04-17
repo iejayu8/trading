@@ -551,6 +551,25 @@ class TestBotLifecycle:
 
         assert status["equity"] == 5000.0
 
+    def test_real_equity_seeded_on_start(self, monkeypatch):
+        """Real-trading bot seeds equity from exchange balance immediately on start.
+
+        This ensures the dashboard does not show stale paper-trading equity
+        after switching from paper to real trading mode.
+        """
+        monkeypatch.setattr(config, "TRADING_MODE", "realtrading")
+        bot = TradingBot(symbol="BTC-USDT")
+
+        monkeypatch.setattr(bot._client, "get_balance", lambda: {
+            "details": [{"currency": "USDT", "equity": "7500.0"}]
+        })
+
+        bot.start()
+        status = db.get_bot_status("BTC-USDT")
+        bot.stop()
+
+        assert abs(float(status["equity"]) - 7500.0) < 0.01
+
 
 # ── _manage_open_trades edge cases ────────────────────────────────────────────
 
