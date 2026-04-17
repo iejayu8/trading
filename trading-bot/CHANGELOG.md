@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.13
+- fix: update equity (USDT) from exchange as soon as realtrading mode is activated
+- Equity is now refreshed even when re-selecting the already-active mode
+- Mode switch API response includes the equity value for immediate frontend display
+
 ## 1.7.12
 - test: add 22 tests for mode-specific DB isolation; sync trading-bot/
 - feat: mode-specific database separation for 4 operating modes

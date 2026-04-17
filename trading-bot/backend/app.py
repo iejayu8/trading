@@ -338,7 +338,7 @@ def api_stop():
     return jsonify({"ok": True, "message": f"Stopped bots: {', '.join(stopped)}"})
 
 
-def _refresh_equity_on_mode_switch(new_mode: str) -> None:
+def _refresh_equity_on_mode_switch(new_mode: str) -> float | None:
     """Refresh equity in bot_status for every symbol right after a mode switch.
 
     For real trading: fetches the live USDT balance from the exchange once and
@@ -346,6 +346,12 @@ def _refresh_equity_on_mode_switch(new_mode: str) -> None:
     For paper trading: recalculates from closed-trade PnL stored in the DB.
     Failures are logged and silently swallowed – the next bot tick will correct
     the value anyway.
+
+    Returns the equity value that was applied (or *None* when the exchange call
+    failed) so callers can include it in their API response.  For real trading
+    all symbols share the same account balance, so the returned value is exact.
+    For paper trading, per-symbol PnL may differ; the first symbol's equity is
+    returned as a representative value.
     """
     real_equity = None
     if new_mode == "realtrading":
@@ -359,6 +365,7 @@ def _refresh_equity_on_mode_switch(new_mode: str) -> None:
                 level="WARNING",
             )
 
+    first_equity: float | None = None
     for sym in config.SUPPORTED_SYMBOLS:
         try:
             if new_mode == "papertrading":
@@ -366,8 +373,12 @@ def _refresh_equity_on_mode_switch(new_mode: str) -> None:
                 closed_pnl = float(stats.get("total_pnl") or 0)
                 equity = config.PAPER_START_EQUITY + closed_pnl
                 db.update_bot_status(symbol=sym, equity=equity)
+                if first_equity is None:
+                    first_equity = equity
             elif real_equity is not None:
                 db.update_bot_status(symbol=sym, equity=real_equity)
+                if first_equity is None:
+                    first_equity = real_equity
             else:
                 # Exchange call failed – clear stale paper equity so the
                 # dashboard shows '–' instead of a misleading value.
@@ -377,6 +388,7 @@ def _refresh_equity_on_mode_switch(new_mode: str) -> None:
                 f"Could not update equity for {sym} on mode switch: {exc}",
                 level="WARNING",
             )
+    return first_equity
 
 
 # ── Trading mode ──────────────────────────────────────────────────────────────
@@ -393,6 +405,10 @@ def api_trading_mode_set():
 
     Expects JSON body: ``{"mode": "papertrading"}`` or ``{"mode": "realtrading"}``.
     All bots must be stopped before switching modes.
+
+    When the requested mode is already active the endpoint still refreshes
+    equity from the exchange (for real trading) so the dashboard always shows
+    an up-to-date balance.
     """
     body = request.get_json(silent=True) or {}
     new_mode = str(body.get("mode", "")).strip().lower()
@@ -400,7 +416,13 @@ def api_trading_mode_set():
         return jsonify({"ok": False, "message": "mode must be 'papertrading' or 'realtrading'"}), 400
 
     if new_mode == config.TRADING_MODE:
-        return jsonify({"ok": True, "mode": new_mode, "message": "Already in this mode"})
+        # Even when already in the requested mode, refresh equity so the
+        # dashboard reflects the latest exchange balance.
+        equity = _refresh_equity_on_mode_switch(new_mode)
+        resp: dict = {"ok": True, "mode": new_mode, "message": "Already in this mode"}
+        if equity is not None:
+            resp["equity"] = equity
+        return jsonify(resp)
 
     # Require all bots to be stopped before switching trading mode.
     any_running = any(b.is_running for b in _bots.values())
@@ -417,8 +439,11 @@ def api_trading_mode_set():
     db.log_event(f"Trading mode changed from {old_mode} to {new_mode}")
     # Immediately refresh equity for all symbols so the dashboard shows the
     # correct balance without waiting for the next bot tick.
-    _refresh_equity_on_mode_switch(new_mode)
-    return jsonify({"ok": True, "mode": new_mode})
+    equity = _refresh_equity_on_mode_switch(new_mode)
+    resp = {"ok": True, "mode": new_mode}
+    if equity is not None:
+        resp["equity"] = equity
+    return jsonify(resp)
 
 
 # ── Configuration ─────────────────────────────────────────────────────────────
