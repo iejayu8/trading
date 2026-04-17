@@ -1472,8 +1472,95 @@ class TestTradingMode:
 
         _config.TRADING_MODE = old_mode
 
+    def test_switch_to_real_returns_equity_in_response(self, app_client):
+        """POST /api/trading/mode should include equity in the response when
+        switching to realtrading so the frontend can display it immediately."""
+        import app as flask_app
+        import config as _config
 
-# ── Header button gating (mode buttons disabled while bots running) ──────────
+        old_mode = _config.TRADING_MODE
+        _config.TRADING_MODE = "papertrading"
+        flask_app._bots.clear()
+
+        with patch.object(flask_app, "BloFinClient") as MockClient:
+            MockClient.return_value.get_balance.return_value = {
+                "details": [{"currency": "USDT", "equity": "4200.50"}]
+            }
+            data = app_client.post(
+                "/api/trading/mode", json={"mode": "realtrading"},
+            ).get_json()
+            assert data["ok"] is True
+            assert data["equity"] == pytest.approx(4200.50)
+
+        # DB should also have the new equity
+        status = database.get_bot_status(_config.SUPPORTED_SYMBOLS[0])
+        assert status["equity"] == pytest.approx(4200.50)
+
+        _config.TRADING_MODE = old_mode
+
+    def test_same_mode_realtrading_refreshes_equity(self, app_client):
+        """When already in realtrading mode, POST /api/trading/mode should
+        still refresh equity from the exchange and return it in the response."""
+        import app as flask_app
+        import config as _config
+
+        old_mode = _config.TRADING_MODE
+        _config.TRADING_MODE = "realtrading"
+        flask_app._bots.clear()
+
+        with patch.object(flask_app, "BloFinClient") as MockClient:
+            MockClient.return_value.get_balance.return_value = {
+                "details": [{"currency": "USDT", "equity": "9999.99"}]
+            }
+            data = app_client.post(
+                "/api/trading/mode", json={"mode": "realtrading"},
+            ).get_json()
+            assert data["ok"] is True
+            assert "Already" in data.get("message", "")
+            assert data["equity"] == pytest.approx(9999.99)
+
+        # DB should be updated as well
+        for sym in _config.SUPPORTED_SYMBOLS:
+            status = database.get_bot_status(sym)
+            assert status["equity"] == pytest.approx(9999.99)
+
+        _config.TRADING_MODE = old_mode
+
+    def test_same_mode_exchange_failure_returns_no_equity(self, app_client):
+        """When already in realtrading and the exchange call fails,
+        the response should not include an equity key."""
+        import app as flask_app
+        import config as _config
+
+        old_mode = _config.TRADING_MODE
+        _config.TRADING_MODE = "realtrading"
+        flask_app._bots.clear()
+
+        with patch.object(flask_app, "BloFinClient", side_effect=Exception("offline")):
+            data = app_client.post(
+                "/api/trading/mode", json={"mode": "realtrading"},
+            ).get_json()
+            assert data["ok"] is True
+            assert "equity" not in data
+
+        _config.TRADING_MODE = old_mode
+
+    def test_switch_to_paper_returns_equity_in_response(self, app_client):
+        """Switching to papertrading should also return equity in the response."""
+        import app as flask_app
+        import config as _config
+
+        old_mode = _config.TRADING_MODE
+        _config.TRADING_MODE = "realtrading"
+        flask_app._bots.clear()
+
+        data = app_client.post(
+            "/api/trading/mode", json={"mode": "papertrading"},
+        ).get_json()
+        assert data["ok"] is True
+        assert data["equity"] == pytest.approx(_config.PAPER_START_EQUITY)
+
+        _config.TRADING_MODE = old_mode
 
 class TestModeButtonGating:
     """Verify that mode-changing endpoints reject requests when bots are running.

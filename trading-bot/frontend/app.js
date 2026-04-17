@@ -643,16 +643,21 @@ async function loadTradingMode() {
 }
 
 async function switchTradingMode(mode) {
-  if (mode === _tradingMode) return;
   if (_anyBotRunning) { alert('Stop all bots before switching trading mode.'); return; }
 
-  const label = mode === 'papertrading' ? 'Paper Trading' : 'Real Trading';
-  if (!confirm(`Switch to ${label}?`)) return;
+  // When the requested mode is already active, silently refresh equity from
+  // the exchange so the dashboard always shows an up-to-date USDT balance.
+  const alreadyActive = (mode === _tradingMode);
 
-  // Stop bots first
-  try {
-    await apiFetch(`${API}/bot/stop`, { method: 'POST' });
-  } catch { /* bots may already be stopped */ }
+  if (!alreadyActive) {
+    const label = mode === 'papertrading' ? 'Paper Trading' : 'Real Trading';
+    if (!confirm(`Switch to ${label}?`)) return;
+
+    // Stop bots first
+    try {
+      await apiFetch(`${API}/bot/stop`, { method: 'POST' });
+    } catch { /* bots may already be stopped */ }
+  }
 
   try {
     const r = await apiFetch(`${API}/trading/mode`, {
@@ -662,6 +667,13 @@ async function switchTradingMode(mode) {
     });
     const data = await r.json();
     if (!data.ok) { alert(`Error switching mode: ${data.message}`); return; }
+
+    // If the response includes a fresh equity value, update the KPI
+    // immediately so the user sees it without waiting for the next poll.
+    if (data.equity != null) {
+      document.getElementById('kpi-equity').textContent =
+        `$${Number(data.equity).toFixed(2)}`;
+    }
   } catch (e) { alert(`Could not switch trading mode: ${e.message}`); return; }
 
   await refreshAll();
