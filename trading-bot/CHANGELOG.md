@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.3
+- feat: add exchange LED indicator to frontend header
+- fix: refresh equity immediately when switching trading mode
+
 ## 1.7.2
 - fix: address code review - validate version format, guard CHANGELOG newline, improve git error messages
 - feat: add auto-version-bump workflow on merge to main
