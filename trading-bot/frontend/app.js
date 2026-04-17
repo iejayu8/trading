@@ -23,6 +23,7 @@ let _activeParamSymbol = null;  // selected symbol in Strategy Parameters
 let _activeChartSymbol = null;  // selected symbol in Market Context
 let _symbols = [];               // list from /api/symbols
 let _copyTradingEnabled = false; // mirrors the DB copy trading toggle
+let _copyTradingPending = false; // true while user has clicked Copy Trading but not yet clicked Apply
 let _tradingMode = 'realtrading'; // mirrors config.TRADING_MODE
 
 // ── Boot ───────────────────────────────────────────────────────────────────
@@ -660,15 +661,20 @@ async function loadCopyTradingConfig() {
   let cfg;
   try { cfg = await fetchJSON(`${API}/copytrading/config`); } catch { return; }
 
+  // If the user has clicked "Copy Trading" but hasn't yet clicked Apply, don't
+  // let the polling loop overwrite the local UI state with the stale backend value.
+  if (_copyTradingPending) return;
+
   _copyTradingEnabled = !!cfg.enabled;
   updateCopyTradingUI(_copyTradingEnabled, cfg.trader_id);
 }
 
 async function switchMode(mode) {
-  if (mode === 'strategy' && !_copyTradingEnabled) return;
+  if (mode === 'strategy' && !_copyTradingEnabled && !_copyTradingPending) return;
   if (mode === 'copy' && _copyTradingEnabled) return;
 
   if (mode === 'strategy') {
+    _copyTradingPending = false;
     // Disable copy trading immediately
     try {
       const r = await fetch(`${API}/copytrading/config`, {
@@ -686,6 +692,7 @@ async function switchMode(mode) {
   // mode === 'copy': show the copy trading UI without saving to the backend yet.
   // (The backend requires a non-empty trader_id before it will accept enabled=true,
   // so we update the UI locally and wait for the user to enter an ID and click Apply.)
+  _copyTradingPending = true;
   _copyTradingEnabled = true;
   const idInput = document.getElementById('copy-trader-id');
   updateCopyTradingUI(true, idInput ? idInput.value.trim() : '');
@@ -703,6 +710,7 @@ async function saveCopyTradingConfig() {
     });
     const data = await r.json();
     if (!data.ok) { alert(`Copy trading config error: ${data.message}`); return; }
+    _copyTradingPending = false;
     await refreshAll();
   } catch (e) { alert(`Could not save copy trading config: ${e.message}`); }
 }
