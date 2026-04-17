@@ -25,6 +25,7 @@ let _symbols = [];               // list from /api/symbols
 let _copyTradingEnabled = false; // mirrors the DB copy trading toggle
 let _copyTradingPendingApply = false; // true while user is entering a trader ID
 let _tradingMode = 'realtrading'; // mirrors config.TRADING_MODE
+let _botRunning = false;          // true when any symbol bot is running
 
 // ── Boot ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -207,6 +208,7 @@ async function refreshAll() {
     refreshLogs(),
     loadTradingMode(),
     loadCopyTradingConfig(),
+    refreshCopyPositions(),
   ]);
 }
 
@@ -227,11 +229,14 @@ async function refreshBotStatus() {
 
   // Bot running = any symbol is running
   const anyRunning = Object.values(allStatus).some(s => s.running === 1);
+  _botRunning = anyRunning;
   document.getElementById('bot-indicator').className =
     `indicator ${anyRunning ? 'indicator--running' : 'indicator--stopped'}`;
   document.getElementById('bot-status-text').textContent = anyRunning ? 'Running' : 'Stopped';
   document.getElementById('btn-start').disabled = anyRunning;
   document.getElementById('btn-stop').disabled  = !anyRunning;
+
+  updateCopyTradingPanelVisibility();
 
   // Mode + equity from active symbol's status
   const activeStatus = allStatus[_activeParamSymbol] || {};
@@ -682,6 +687,8 @@ function updateCopyTradingUI(enabled, trader_id) {
       statusEl.className = 'copy-trading-status';
     }
   }
+
+  updateCopyTradingPanelVisibility();
 }
 
 async function loadCopyTradingConfig() {
@@ -739,6 +746,71 @@ async function saveCopyTradingConfig() {
     await refreshAll();
     _copyTradingPendingApply = false;
   } catch (e) { _copyTradingPendingApply = false; alert(`Could not save copy trading config: ${e.message}`); }
+}
+
+// ── Copy Trading panel visibility & open positions ──────────────────────────
+
+/**
+ * Show the copy-positions panel and hide strategy sections when copy trading
+ * is active AND the bot is running. Restore the normal view otherwise.
+ */
+function updateCopyTradingPanelVisibility() {
+  const showCopy = _copyTradingEnabled && _botRunning;
+
+  const symbolStatusPanel = document.getElementById('all-symbols-status-panel');
+  const symbolPanel       = document.getElementById('symbol-panel');
+  const copyPanel         = document.getElementById('copy-positions-panel');
+
+  if (symbolStatusPanel) symbolStatusPanel.classList.toggle('hidden', showCopy);
+  if (symbolPanel)       symbolPanel.classList.toggle('hidden', showCopy);
+  if (copyPanel)         copyPanel.classList.toggle('hidden', !showCopy);
+}
+
+/** Fetch open trades from the backend and render them in the copy positions table. */
+async function refreshCopyPositions() {
+  if (!_copyTradingEnabled || !_botRunning) return;
+
+  let trades, statusMap;
+  try { trades = await fetchJSON(`${API}/trades/open`); } catch { return; }
+  try { statusMap = await fetchJSON(`${API}/status`); } catch { statusMap = {}; }
+
+  const tbody = document.querySelector('#copy-positions-table tbody');
+  if (!tbody) return;
+
+  if (!trades.length) {
+    tbody.innerHTML = '<tr><td colspan="10" class="empty-msg" style="padding:12px">No open positions</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = '';
+  trades.forEach(t => {
+    const entry  = Number(t.entry_price);
+    const size   = Number(t.size);
+    const isLong = t.direction === 'LONG';
+    const value  = size * entry;
+
+    let currentProfitStr = '–';
+    const symStatus = statusMap[t.symbol];
+    const cp = symStatus && symStatus.last_price != null ? Number(symStatus.last_price) : null;
+    if (cp != null) {
+      const cpPnl = isLong ? (cp - entry) * size : (entry - cp) * size;
+      currentProfitStr = `<span class="${cpPnl >= 0 ? 'text-green' : 'text-red'}">${cpPnl >= 0 ? '+' : ''}${cpPnl.toFixed(2)}</span>`;
+    }
+
+    tbody.innerHTML += `
+      <tr>
+        <td>${t.id}</td>
+        <td><strong>${escHtml(t.symbol)}</strong></td>
+        <td><strong>${escHtml(t.direction)}</strong></td>
+        <td>${formatPrice(t.entry_price)}</td>
+        <td>${t.size}</td>
+        <td>$${value.toFixed(2)}</td>
+        <td>${formatPrice(t.sl_price)}</td>
+        <td>${formatPrice(t.tp_price)}</td>
+        <td>${currentProfitStr}</td>
+        <td>${fmtTs(t.opened_at)}</td>
+      </tr>`;
+  });
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
