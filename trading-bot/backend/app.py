@@ -346,7 +346,10 @@ def _refresh_equity_on_mode_switch(new_mode: str) -> float | None:
     the value anyway.
 
     Returns the equity value that was applied (or *None* when the exchange call
-    failed) so callers can include it in their API response.
+    failed) so callers can include it in their API response.  For real trading
+    all symbols share the same account balance, so the returned value is exact.
+    For paper trading, per-symbol PnL may differ; the first symbol's equity is
+    returned as a representative value.
     """
     real_equity = None
     if new_mode == "realtrading":
