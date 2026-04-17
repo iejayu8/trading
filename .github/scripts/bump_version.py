@@ -20,9 +20,17 @@ BUMP_MARKER = "chore: bump version"
 
 
 def git(*args):
-    result = subprocess.run(
-        ["git"] + list(args), capture_output=True, text=True, check=True
-    )
+    try:
+        result = subprocess.run(
+            ["git"] + list(args), capture_output=True, text=True, check=True
+        )
+    except subprocess.CalledProcessError as exc:
+        print(
+            f"git command failed: git {' '.join(args)}\n"
+            f"stderr: {exc.stderr.strip()}",
+            file=sys.stderr,
+        )
+        raise
     return result.stdout.strip()
 
 
@@ -33,7 +41,11 @@ with open(CONFIG_PATH) as f:
 
 config = json.loads(config_text)
 current = config["version"]
-major, minor, patch = map(int, current.split("."))
+parts = current.split(".")
+if len(parts) != 3 or not all(p.isdigit() for p in parts):
+    print(f"Unexpected version format: {current!r}", file=sys.stderr)
+    sys.exit(1)
+major, minor, patch = map(int, parts)
 new_version = f"{major}.{minor}.{patch + 1}"
 
 # Update version field in-place (preserves file formatting)
@@ -75,7 +87,11 @@ with open(CHANGELOG_PATH) as f:
     existing = f.read()
 
 # Insert after the "# Changelog" header line
-header_end = existing.index("\n") + 1
+header_end = existing.find("\n")
+if header_end == -1:
+    # No newline found — treat the whole file as the header
+    header_end = len(existing)
+header_end += 1  # include the newline itself
 new_changelog = (
     existing[:header_end]
     + "\n"
