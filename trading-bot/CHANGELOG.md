@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.7.6
+- Fix Live Symbol Status collapse button CSS specificity bug
+
 ## 1.7.5
 - Address code review feedback: fix import alias, test isolation, and INSERT OR IGNORE
 - Fix import bugs in app.py and add comprehensive tests for 100% coverage
