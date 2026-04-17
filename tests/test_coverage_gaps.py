@@ -426,7 +426,7 @@ class TestDatabaseEdgeCoverage:
                     trader_id TEXT NOT NULL DEFAULT '',
                     updated_at TEXT NOT NULL
                 );
-                INSERT INTO copy_trading_config (id, enabled, trader_id, updated_at) VALUES (1, 0, '', datetime('now'));
+                INSERT OR IGNORE INTO copy_trading_config (id, enabled, trader_id, updated_at) VALUES (1, 0, '', datetime('now'));
             """)
             conn.close()
 
@@ -1132,9 +1132,6 @@ class TestAppCoverage:
         data = resp.get_json()
         assert data["mode"] == "realtrading"
 
-        # Reset back to paper for other tests
-        config.TRADING_MODE = "realtrading"
-
     def test_mode_switch_real_balance_failure(self, app_client, monkeypatch):
         """Cover real-trading balance failure on mode switch (lines 367, 372-373)."""
         client, flask_app = app_client
@@ -1157,9 +1154,6 @@ class TestAppCoverage:
         for sym in config.SUPPORTED_SYMBOLS:
             status = db.get_bot_status(sym)
             assert status.get("equity") is None
-
-        # Reset
-        config.TRADING_MODE = "realtrading"
 
     def test_port_is_free(self):
         """Cover _port_is_free function (lines 582-584)."""
@@ -1219,9 +1213,6 @@ class TestAppModeSwitch:
             content_type="application/json",
         )
         assert resp.status_code == 200
-
-        # Reset
-        config.TRADING_MODE = "papertrading"
 
     def test_manual_close_equity_refresh_exception(self, app_client, monkeypatch):
         """Cover equity refresh exception after manual close (lines 235-236)."""

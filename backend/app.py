@@ -426,8 +426,8 @@ def api_config():
     try:
         from .strategy import ADX_MIN, RSI_PULLBACK_MAX, RSI_RECOVERY_LONG, PULLBACK_LOOKBACK, SIGNAL_COOLDOWN
     except ImportError:
-        import importlib as _il
-        _s = _il.import_module("strategy")
+        import importlib
+        _s = importlib.import_module("strategy")
         ADX_MIN = _s.ADX_MIN
         RSI_PULLBACK_MAX = _s.RSI_PULLBACK_MAX
         RSI_RECOVERY_LONG = _s.RSI_RECOVERY_LONG
