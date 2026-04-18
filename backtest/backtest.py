@@ -7,7 +7,7 @@ Simulates the EMA + RSI + Volume strategy on historical BTC/USDT
 Usage
 ─────
     cd backtest
-    python backtest.py               # uses cached CSV or fetches from Binance
+    python backtest.py               # uses cached CSV or fetches from BloFin
     python backtest.py --fresh       # force re-fetch data
     python backtest.py --equity 1000 # start with custom equity
 """
@@ -279,13 +279,13 @@ class Backtest:
 
 # ── CLI entry point ───────────────────────────────────────────────────────────
 
-def _run_single(symbol_upper: str, equity: float, days: int, fresh: bool) -> dict | None:
-    """Run backtest for a single Binance-style symbol (e.g. BTCUSDT).
+def _run_single(symbol: str, equity: float, days: int, fresh: bool) -> dict | None:
+    """Run backtest for a single symbol.
 
     Parameters
     ----------
-    symbol_upper : str
-        Binance-format symbol in uppercase (e.g. ``"BTCUSDT"``).
+    symbol : str
+        BloFin instrument ID (e.g. ``"BTC-USDT"``).
     equity : float
         Starting equity in USDT.
     days : int
@@ -295,30 +295,28 @@ def _run_single(symbol_upper: str, equity: float, days: int, fresh: bool) -> dic
 
     Returns the results dict or None on error.
     """
-    blofin_symbol = symbol_upper.replace("USDT", "-USDT")  # ETHUSDT → ETH-USDT
-
     if fresh:
-        csv = Path(__file__).parent / "data" / f"{symbol_upper}_15m.csv"
+        csv = Path(__file__).parent / "data" / f"{symbol}_15m.csv"
         csv.unlink(missing_ok=True)
 
-    df = load_or_fetch(symbol_upper, days=days)
+    df = load_or_fetch(symbol, days=days)
     print(f"\nLoaded {len(df)} candles  ({df.index[0]} → {df.index[-1]})\n")
 
-    bt = Backtest(initial_equity=equity, symbol=blofin_symbol)
+    bt = Backtest(initial_equity=equity, symbol=symbol)
     results = bt.run(df)
 
     if "error" in results:
-        print(f"ERROR ({blofin_symbol}): {results['error']}")
+        print(f"ERROR ({symbol}): {results['error']}")
         return None
 
     # Per-symbol params for display
-    sym_params = config.get_symbol_params(blofin_symbol)
+    sym_params = config.get_symbol_params(symbol)
 
     # Pretty print summary
     print("=" * 55)
     print("  BACKTEST RESULTS")
     print("=" * 55)
-    print(f"  Symbol          : {blofin_symbol}")
+    print(f"  Symbol          : {symbol}")
     print(f"  Timeframe       : 15m")
     print(f"  Leverage        : {config.LEVERAGE}x")
     print(f"  Risk/trade      : {config.RISK_PER_TRADE*100:.1f}%")
@@ -337,9 +335,9 @@ def _run_single(symbol_upper: str, equity: float, days: int, fresh: bool) -> dic
 
     # Save JSON results
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    out_path = RESULTS_DIR / f"backtest_{symbol_upper}_{ts}.json"
+    out_path = RESULTS_DIR / f"backtest_{symbol}_{ts}.json"
     results_to_save = {k: v for k, v in results.items() if k != "trades"}
-    results_to_save["symbol"] = blofin_symbol
+    results_to_save["symbol"] = symbol
     results_to_save["trades_count"] = len(results.get("trades", []))
     with open(out_path, "w") as f:
         json.dump(results_to_save, f, indent=2)
@@ -349,7 +347,7 @@ def _run_single(symbol_upper: str, equity: float, days: int, fresh: bool) -> dic
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Strategy backtester")
-    parser.add_argument("--symbol", type=str, default="BTCUSDT", help="Binance symbol (e.g. ETHUSDT)")
+    parser.add_argument("--symbol", type=str, default="BTC-USDT", help="BloFin symbol (e.g. ETH-USDT)")
     parser.add_argument("--all", action="store_true", help="Run on all supported symbols")
     parser.add_argument("--fresh", action="store_true", help="Re-fetch data")
     parser.add_argument(
@@ -359,17 +357,15 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.all:
-        # Convert BloFin symbols (BTC-USDT) to Binance format (BTCUSDT) for data fetch.
-        symbols = [s.replace("-", "") for s in config.SUPPORTED_SYMBOLS]
+        symbols = list(config.SUPPORTED_SYMBOLS)
     else:
-        symbols = [args.symbol.upper()]
+        symbols = [args.symbol]
 
     all_results: list[dict] = []
     for sym in symbols:
         result = _run_single(sym, args.equity, args.days, args.fresh)
         if result is not None:
-            blofin_sym = sym.replace("USDT", "-USDT")
-            result["symbol"] = blofin_sym
+            result["symbol"] = sym
             all_results.append(result)
 
     if len(all_results) > 1:
