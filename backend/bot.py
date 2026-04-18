@@ -761,16 +761,30 @@ class TradingBot:
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _daily_loss_exceeded(self, current_equity: float) -> bool:
-        """Simple daily P&L check using DB trade records for this symbol."""
+        """Portfolio-wide daily P&L check using DB trade records.
+
+        Aggregates losses across ALL symbols (not just this bot's symbol)
+        because all bots share one account.  Uses ``PAPER_START_EQUITY``
+        (paper) or the provided *current_equity* (real) as the denominator
+        so the threshold is stable even when unrealised PnL fluctuates.
+        """
         today = datetime.now(timezone.utc).date().isoformat()
-        trades = db.get_trade_history(self.symbol, limit=50)
+        # Portfolio-wide: all symbols' trades for today
+        trades = db.get_trade_history(symbol=None, limit=200)
         daily_pnl = sum(
             t["pnl"] or 0
             for t in trades
             if (t.get("closed_at") or "").startswith(today)
         )
-        if current_equity > 0:
-            return (daily_pnl / current_equity) < -config.MAX_DAILY_LOSS_PCT
+        # Use a stable denominator: paper start equity for paper mode,
+        # current equity for real mode (best available proxy).
+        denom = (
+            float(config.PAPER_START_EQUITY)
+            if self.paper_trading
+            else current_equity
+        )
+        if denom > 0:
+            return (daily_pnl / denom) < -config.MAX_DAILY_LOSS_PCT
         return False
 
     def _refresh_equity_after_close(self) -> None:

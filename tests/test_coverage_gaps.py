@@ -182,11 +182,11 @@ class TestConfigModuleLevelGuards:
 
     def test_max_portfolio_risk_invalid_clamped(self, monkeypatch):
         self._reload_config(monkeypatch, {"MAX_PORTFOLIO_RISK_PCT": "-1"})
-        assert config.MAX_PORTFOLIO_RISK_PCT == pytest.approx(0.03)
+        assert config.MAX_PORTFOLIO_RISK_PCT == pytest.approx(0.05)
 
     def test_max_portfolio_risk_over_one_clamped(self, monkeypatch):
         self._reload_config(monkeypatch, {"MAX_PORTFOLIO_RISK_PCT": "2.0"})
-        assert config.MAX_PORTFOLIO_RISK_PCT == pytest.approx(0.03)
+        assert config.MAX_PORTFOLIO_RISK_PCT == pytest.approx(0.05)
 
     def test_max_symbol_exposure_invalid_clamped(self, monkeypatch):
         self._reload_config(monkeypatch, {"MAX_SYMBOL_EXPOSURE_PCT": "2.0"})

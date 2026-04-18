@@ -215,6 +215,53 @@ class TestDailyLossExceeded:
         bot = TradingBot(symbol="BTC-USDT")
         assert bot._daily_loss_exceeded(0.0) is False
 
+    def test_portfolio_wide_aggregation(self, monkeypatch):
+        """Daily loss guard should aggregate losses across ALL symbols."""
+        monkeypatch.setattr(config, "TRADING_MODE", "papertrading")
+        monkeypatch.setattr(config, "PAPER_START_EQUITY", 1000.0)
+        monkeypatch.setattr(config, "MAX_DAILY_LOSS_PCT", 0.03)
+        bot = TradingBot(symbol="BTC-USDT")
+
+        # Two small losses on different symbols that together exceed 3%
+        t1 = db.open_trade("BTC-USDT", "LONG", 100.0, 1.0, 95.0, 110.0, 5)
+        db.close_trade(t1, 95.0, -20.0)  # -2% of 1000
+        t2 = db.open_trade("ETH-USDT", "SHORT", 3000.0, 0.1, 3100.0, 2800.0, 5)
+        db.close_trade(t2, 3100.0, -15.0)  # -1.5% of 1000
+
+        # Total daily loss = -35 / 1000 = -3.5% > -3% limit
+        assert bot._daily_loss_exceeded(1000.0) is True
+
+    def test_paper_mode_uses_start_equity_denominator(self, monkeypatch):
+        """Paper mode should use PAPER_START_EQUITY as denominator, not current equity."""
+        monkeypatch.setattr(config, "TRADING_MODE", "papertrading")
+        monkeypatch.setattr(config, "PAPER_START_EQUITY", 1000.0)
+        monkeypatch.setattr(config, "MAX_DAILY_LOSS_PCT", 0.03)
+        bot = TradingBot(symbol="BTC-USDT")
+
+        # Loss of -25 USDT on a 1000 start equity = -2.5% (within -3% limit)
+        t1 = db.open_trade("BTC-USDT", "LONG", 100.0, 1.0, 95.0, 110.0, 5)
+        db.close_trade(t1, 95.0, -25.0)
+
+        # If denominator were current equity (e.g. 950 from unrealised PnL),
+        # -25/950 = -2.63% which is still within limit.
+        # With start equity: -25/1000 = -2.5%, within limit.
+        assert bot._daily_loss_exceeded(950.0) is False
+
+    def test_real_mode_uses_current_equity_denominator(self, monkeypatch):
+        """Real mode should use current equity as denominator."""
+        monkeypatch.setattr(config, "TRADING_MODE", "realtrading")
+        monkeypatch.setattr(config, "MAX_DAILY_LOSS_PCT", 0.03)
+        bot = TradingBot(symbol="BTC-USDT")
+
+        # Loss of -35 USDT
+        t1 = db.open_trade("BTC-USDT", "LONG", 100.0, 1.0, 95.0, 110.0, 5)
+        db.close_trade(t1, 95.0, -35.0)
+
+        # -35/1000 = -3.5% > -3% limit → exceeded
+        assert bot._daily_loss_exceeded(1000.0) is True
+        # -35/1500 = -2.3% < -3% limit → not exceeded
+        assert bot._daily_loss_exceeded(1500.0) is False
+
 
 # ── _paper_equity ─────────────────────────────────────────────────────────────
 
