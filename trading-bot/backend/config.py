@@ -159,7 +159,7 @@ SYMBOL_PARAMS: dict[str, dict] = {
     },
     # SOL-USDT: grid-search (365-day 15m data).
     # Higher ADX gate filters noisier SOL price action; wide TP (7%) captures
-    # SOL's characteristic strong momentum moves.  Longer lookback (5 bars) and
+    # SOL's characteristic strong momentum moves. Longer lookback (5 bars) and
     # moderate cooldown (24 bars = 6h) balance frequency with quality.
     # Relaxed from v7 initial params: ADX 25→22 to capture valid trends in
     # SOL's natural ADX range, RSI recovery 55→52 for earlier entry,
