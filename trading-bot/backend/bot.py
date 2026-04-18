@@ -761,16 +761,30 @@ class TradingBot:
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _daily_loss_exceeded(self, current_equity: float) -> bool:
-        """Simple daily P&L check using DB trade records for this symbol."""
+        """Portfolio-wide daily P&L check using DB trade records.
+
+        Aggregates losses across ALL symbols (not just this bot's symbol)
+        because all bots share one account.  Uses ``PAPER_START_EQUITY``
+        (paper) or the provided *current_equity* (real) as the denominator
+        so the threshold is stable even when unrealised PnL fluctuates.
+        """
         today = datetime.now(timezone.utc).date().isoformat()
-        trades = db.get_trade_history(self.symbol, limit=50)
+        # Portfolio-wide: all symbols' trades for today
+        trades = db.get_trade_history(symbol=None, limit=200)
         daily_pnl = sum(
             t["pnl"] or 0
             for t in trades
             if (t.get("closed_at") or "").startswith(today)
         )
-        if current_equity > 0:
-            return (daily_pnl / current_equity) < -config.MAX_DAILY_LOSS_PCT
+        # Use a stable denominator: paper start equity for paper mode,
+        # current equity for real mode (best available proxy).
+        denom = (
+            float(config.PAPER_START_EQUITY)
+            if self.paper_trading
+            else current_equity
+        )
+        if denom > 0:
+            return (daily_pnl / denom) < -config.MAX_DAILY_LOSS_PCT
         return False
 
     def _refresh_equity_after_close(self) -> None:
@@ -802,11 +816,21 @@ class TradingBot:
     def _paper_equity(self, current_price: float | None = None) -> float:
         """Simulated equity for paper mode: start_equity + closed PnL + unrealised PnL.
 
-        Unrealised PnL is included when *current_price* is provided so the equity
-        shown on the dashboard moves with the market while a position is open.
+        Aggregates closed PnL across **all symbols** because paper trading uses a
+        single shared starting balance.  Per-symbol calculation previously caused
+        each bot to see a different equity value, leading to inconsistent portfolio
+        cap enforcement when multiple symbols were running simultaneously.
+
+        Unrealised PnL for *this* symbol is included when *current_price* is
+        provided so the equity shown on the dashboard moves with the market while
+        a position is open.  Unrealised PnL for other symbols is excluded here
+        because we don't have their current prices; the price-sync loop on each
+        bot updates equity independently.
         """
-        stats = db.get_trade_stats(symbol=self.symbol)
-        closed_pnl = float(stats.get("total_pnl") or 0)
+        # Portfolio-wide closed PnL (all symbols share one paper account).
+        all_stats = db.get_trade_stats()  # no symbol filter → aggregate
+        closed_pnl = float(all_stats.get("total_pnl") or 0)
+
         unrealised_pnl = 0.0
         if current_price is not None:
             for trade in db.get_open_trades(symbol=self.symbol):

@@ -224,8 +224,9 @@ def api_close_trade(trade_id: int):
     # Mirrors what TradingBot._refresh_equity_after_close() does internally.
     try:
         if config.TRADING_MODE == "papertrading":
-            stats = db.get_trade_stats(symbol)
-            closed_pnl = float(stats.get("total_pnl") or 0)
+            # Use portfolio-wide PnL (all symbols share one paper account).
+            all_stats = db.get_trade_stats()
+            closed_pnl = float(all_stats.get("total_pnl") or 0)
             equity = config.PAPER_START_EQUITY + closed_pnl
             db.update_bot_status(symbol=symbol, equity=equity)
         else:
@@ -366,15 +367,20 @@ def _refresh_equity_on_mode_switch(new_mode: str) -> float | None:
             )
 
     first_equity: float | None = None
+    # For paper trading, compute portfolio-wide PnL once (all symbols share
+    # one account) instead of per-symbol PnL which under-reports equity.
+    paper_equity: float | None = None
+    if new_mode == "papertrading":
+        all_stats = db.get_trade_stats()  # portfolio-wide
+        closed_pnl = float(all_stats.get("total_pnl") or 0)
+        paper_equity = config.PAPER_START_EQUITY + closed_pnl
+
     for sym in config.SUPPORTED_SYMBOLS:
         try:
-            if new_mode == "papertrading":
-                stats = db.get_trade_stats(sym)
-                closed_pnl = float(stats.get("total_pnl") or 0)
-                equity = config.PAPER_START_EQUITY + closed_pnl
-                db.update_bot_status(symbol=sym, equity=equity)
+            if new_mode == "papertrading" and paper_equity is not None:
+                db.update_bot_status(symbol=sym, equity=paper_equity)
                 if first_equity is None:
-                    first_equity = equity
+                    first_equity = paper_equity
             elif real_equity is not None:
                 db.update_bot_status(symbol=sym, equity=real_equity)
                 if first_equity is None:

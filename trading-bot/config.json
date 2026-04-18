@@ -1,6 +1,6 @@
 {
   "name": "Trading Bot",
-  "version": "1.7.15",
+  "version": "1.7.16",
   "slug": "trading_bot",
   "description": "Run the BloFin trading bot and dashboard inside Home Assistant",
   "startup": "application",
@@ -34,7 +34,7 @@
     "TRADING_MARGIN_MODE": "isolated",
     "MAX_OPEN_POSITIONS": 3,
     "MAX_MARGIN_USAGE_PCT": 0.40,
-    "MAX_PORTFOLIO_RISK_PCT": 0.03,
+    "MAX_PORTFOLIO_RISK_PCT": 0.05,
     "MAX_SYMBOL_EXPOSURE_PCT": 0.50
   },
   "schema": {

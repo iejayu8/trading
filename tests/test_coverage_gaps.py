@@ -182,11 +182,11 @@ class TestConfigModuleLevelGuards:
 
     def test_max_portfolio_risk_invalid_clamped(self, monkeypatch):
         self._reload_config(monkeypatch, {"MAX_PORTFOLIO_RISK_PCT": "-1"})
-        assert config.MAX_PORTFOLIO_RISK_PCT == pytest.approx(0.03)
+        assert config.MAX_PORTFOLIO_RISK_PCT == pytest.approx(0.05)
 
     def test_max_portfolio_risk_over_one_clamped(self, monkeypatch):
         self._reload_config(monkeypatch, {"MAX_PORTFOLIO_RISK_PCT": "2.0"})
-        assert config.MAX_PORTFOLIO_RISK_PCT == pytest.approx(0.03)
+        assert config.MAX_PORTFOLIO_RISK_PCT == pytest.approx(0.05)
 
     def test_max_symbol_exposure_invalid_clamped(self, monkeypatch):
         self._reload_config(monkeypatch, {"MAX_SYMBOL_EXPOSURE_PCT": "2.0"})
@@ -1206,19 +1206,24 @@ class TestAppModeSwitch:
         _config.COPY_TRADING_ENABLED = old_copy
 
     def test_mode_switch_equity_update_exception(self, app_client, monkeypatch):
-        """Cover per-symbol equity update exception during mode switch (line 372-374)."""
+        """Cover per-symbol equity update exception during mode switch."""
         client, flask_app = app_client
         monkeypatch.setattr(config, "TRADING_MODE", "realtrading")
 
-        # Make db.get_trade_stats raise for papertrading path
-        original_get_trade_stats = db.get_trade_stats
+        # Make db.update_bot_status raise for the per-symbol path so the
+        # exception handler inside the loop is exercised.
+        original_update = db.update_bot_status
+        call_count = {"n": 0}
 
-        def failing_stats(symbol=None):
-            raise RuntimeError("DB error on purpose")
+        def failing_update(symbol, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise RuntimeError("DB error on purpose")
+            return original_update(symbol, **kwargs)
 
-        monkeypatch.setattr(db, "get_trade_stats", failing_stats)
+        monkeypatch.setattr(db, "update_bot_status", failing_update)
 
-        # Switch to paper trading (which calls get_trade_stats for each symbol)
+        # Switch to paper trading (which calls update_bot_status for each symbol)
         resp = client.post(
             "/api/trading/mode",
             json={"mode": "papertrading"},
