@@ -282,6 +282,17 @@ class Backtest:
 def _run_single(symbol_upper: str, equity: float, days: int, fresh: bool) -> dict | None:
     """Run backtest for a single Binance-style symbol (e.g. BTCUSDT).
 
+    Parameters
+    ----------
+    symbol_upper : str
+        Binance-format symbol in uppercase (e.g. ``"BTCUSDT"``).
+    equity : float
+        Starting equity in USDT.
+    days : int
+        Number of days of historical data to use.
+    fresh : bool
+        When True, delete any cached CSV and re-fetch data.
+
     Returns the results dict or None on error.
     """
     blofin_symbol = symbol_upper.replace("USDT", "-USDT")  # ETHUSDT → ETH-USDT
@@ -369,7 +380,7 @@ def main() -> None:
         total_pnl = sum(r["total_pnl"] for r in all_results)
         total_trades = sum(r["total_trades"] for r in all_results)
         total_wins = sum(r["wins"] for r in all_results)
-        combined_return = sum(r["return_pct"] for r in all_results) / len(all_results)
+        avg_return = sum(r["return_pct"] for r in all_results) / len(all_results)
         overall_wr = (total_wins / total_trades * 100) if total_trades > 0 else 0
 
         for r in all_results:
@@ -377,7 +388,7 @@ def main() -> None:
                   f"WR={r['win_rate_pct']:5.1f}%  trades={r['total_trades']:3d}  "
                   f"DD={r['max_drawdown_pct']:6.2f}%")
         print("-" * 65)
-        print(f"  {'TOTAL':>10s}  avg_return={combined_return:+6.2f}%  "
+        print(f"  {'TOTAL':>10s}  avg_return={avg_return:+6.2f}%  "
               f"WR={overall_wr:5.1f}%  trades={total_trades:3d}  "
               f"PnL=${total_pnl:+.2f}")
         print("=" * 65)
