@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.7.17
+- Merge pull request #40 from iejayu8/copilot/analyze-app-for-issues
+
 ## 1.7.16
 - fix: portfolio-wide paper equity and daily loss guard (was per-symbol, allowing 5× intended drawdown)
 - fix: daily loss guard uses PAPER_START_EQUITY as stable denominator in paper mode
