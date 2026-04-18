@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.16
+- fix: portfolio-wide paper equity and daily loss guard (was per-symbol, allowing 5× intended drawdown)
+- fix: daily loss guard uses PAPER_START_EQUITY as stable denominator in paper mode
+- fix: raise MAX_PORTFOLIO_RISK_PCT from 3% to 5% to prevent boundary blocking from position size rounding
+- fix: relax per-symbol strategy params for SOL, XRP, LINK (signal generation was near-impossible)
+
 ## 1.7.15
 - feat: 5-second copy trading sync interval with lightweight _tick_copy_only
 
