@@ -81,7 +81,7 @@ MAX_DAILY_LOSS_PCT: float = 0.03  # 3 % daily drawdown guard
 # These prevent all running bots from collectively over-allocating equity.
 MAX_OPEN_POSITIONS: int = _env_int("MAX_OPEN_POSITIONS", 3)
 MAX_MARGIN_USAGE_PCT: float = _env_float("MAX_MARGIN_USAGE_PCT", 0.40)     # 40 % of equity as margin
-MAX_PORTFOLIO_RISK_PCT: float = _env_float("MAX_PORTFOLIO_RISK_PCT", 0.03)  # 3 % equity at risk across all stops
+MAX_PORTFOLIO_RISK_PCT: float = _env_float("MAX_PORTFOLIO_RISK_PCT", 0.05)  # 5 % equity at risk across all stops
 MAX_SYMBOL_EXPOSURE_PCT: float = _env_float("MAX_SYMBOL_EXPOSURE_PCT", 0.50)  # no symbol > 50 % of notional cap
 
 if MAX_OPEN_POSITIONS < 1:
@@ -158,45 +158,48 @@ SYMBOL_PARAMS: dict[str, dict] = {
         "take_profit_pct": 0.070,   # 7.0% — wider to capture ETH momentum bursts
     },
     # SOL-USDT: grid-search (365-day 15m data).
-    # Higher ADX gate (25) filters noisier SOL price action; wide TP (7%) captures
-    # SOL's characteristic strong momentum moves. Longer lookback (6 bars) and
-    # mid-range cooldown (36 bars = 9h) balance frequency with quality.
-    # +28.41% return, WR=24.8%, MaxDD=-14.22%
+    # Higher ADX gate filters noisier SOL price action; wide TP (7%) captures
+    # SOL's characteristic strong momentum moves.  Longer lookback (5 bars) and
+    # moderate cooldown (24 bars = 6h) balance frequency with quality.
+    # Relaxed from v7 initial params: ADX 25→22 to capture valid trends in
+    # SOL's natural ADX range, RSI recovery 55→52 for earlier entry,
+    # lookback 6→5 bars for fresher setups.
     "SOL-USDT": {
         "stop_loss_pct":    0.015,   # 1.5%
         "take_profit_pct":  0.070,   # 7.0%
-        "adx_min":          25.0,    # stronger trend gate for volatile SOL
-        "rsi_pullback_max": 42.0,    # tighter pullback requirement
-        "rsi_recovery_long": 55.0,   # stronger recovery confirmation
-        "pullback_lookback": 6,      # wider freshness window (90 min)
-        "signal_cooldown":  36,      # 9-hour cooldown between signals
+        "adx_min":          22.0,    # relaxed from 25: SOL trends at lower ADX
+        "rsi_pullback_max": 44.0,    # relaxed from 42: wider pullback window
+        "rsi_recovery_long": 52.0,   # relaxed from 55: earlier entry confirmation
+        "pullback_lookback": 5,      # tightened from 6: fresher setups (75 min)
+        "signal_cooldown":  24,      # reduced from 36: 6-hour cooldown
     },
     # XRP-USDT: grid-search (365-day 15m data).
-    # Strict RSI pullback (38) with wide TP (7%) gives excellent 1.801 profit
-    # factor. XRP's tight max drawdown (-4.38%) allows confident deployment.
-    # +27.73% return, WR=32.6%, MaxDD=-4.38%
+    # XRP's tight max drawdown (-4.38%) allows confident deployment.
+    # Relaxed RSI pullback from 38→42 to qualify more setups and recovery
+    # from 55→52 for earlier entries.
     "XRP-USDT": {
         "stop_loss_pct":    0.015,   # 1.5%
         "take_profit_pct":  0.070,   # 7.0%
         "adx_min":          22.0,    # standard ADX gate
-        "rsi_pullback_max": 38.0,    # strict: only deep pullbacks qualify
-        "rsi_recovery_long": 55.0,   # strong recovery required
-        "pullback_lookback": 6,      # 90-min freshness window
+        "rsi_pullback_max": 42.0,    # relaxed from 38: moderate pullbacks qualify
+        "rsi_recovery_long": 52.0,   # relaxed from 55: earlier recovery confirmation
+        "pullback_lookback": 5,      # reduced from 6: fresher setups (75 min)
         "signal_cooldown":  24,      # 6-hour cooldown
     },
     # LINK-USDT: wide grid-search (365-day 15m data).
     # LINK was -35.6% on the year (strong downtrend Q3/Q4) so the strategy
-    # captures short-side momentum. Lower ADX gate (15) and tighter SL (1%)
-    # with conservative TP (5.5%) gives the best Calmar ratio.
-    # +27.41% return, WR=25.0%, MaxDD=-8.94%
+    # captures short-side momentum. Lower ADX gate (18) and tighter SL (1%)
+    # with conservative TP (5.5%).
+    # Relaxed from initial params: RSI recovery 58→52 (20-point recovery was
+    # nearly impossible), pullback 38→42, lookback 8→5, cooldown 48→24.
     "LINK-USDT": {
         "stop_loss_pct":    0.010,   # 1.0% — tight SL for volatile LINK
         "take_profit_pct":  0.055,   # 5.5%
-        "adx_min":          15.0,    # lower gate: LINK trends at lower ADX
-        "rsi_pullback_max": 38.0,    # strict pullback (only deep dips)
-        "rsi_recovery_long": 58.0,   # stronger confirmation (above 58)
-        "pullback_lookback": 8,      # 2-hour freshness window
-        "signal_cooldown":  48,      # 12-hour cooldown (conservative)
+        "adx_min":          18.0,    # relaxed from 15: slight noise filter
+        "rsi_pullback_max": 42.0,    # relaxed from 38: moderate pullbacks
+        "rsi_recovery_long": 52.0,   # relaxed from 58: recovery was impossible
+        "pullback_lookback": 5,      # tightened from 8: fresher setups (75 min)
+        "signal_cooldown":  24,      # reduced from 48: 6-hour cooldown
     },
 }
 
