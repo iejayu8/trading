@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.18
+- Replace Binance API with BloFin API for backtest data fetching
+- Address review comments: rename variable, add docstring params
+- Align backtest with bot: fix position sizing, fee double-count, daily loss guard, add --all flag
+
 ## 1.7.17
 - Merge pull request #40 from iejayu8/copilot/analyze-app-for-issues
 
