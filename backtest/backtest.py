@@ -7,7 +7,7 @@ Simulates the EMA + RSI + Volume strategy on historical BTC/USDT
 Usage
 ─────
     cd backtest
-    python backtest.py               # uses cached CSV or fetches from Binance
+    python backtest.py               # uses cached CSV or fetches from BloFin
     python backtest.py --fresh       # force re-fetch data
     python backtest.py --equity 1000 # start with custom equity
 """
@@ -108,7 +108,10 @@ class Backtest:
             else:
                 entry_price *= 1 - self.SLIPPAGE
 
-            size = calculate_position_size(self.equity, entry_price)
+            size = calculate_position_size(
+                self.equity, entry_price,
+                stop_loss_pct=params["stop_loss_pct"],
+            )
             sl, tp = calculate_sl_tp(
                 entry_price, signal,
                 stop_loss_pct=params["stop_loss_pct"],
@@ -190,7 +193,9 @@ class Backtest:
         # via position sizing: size = equity×risk_pct / (entry×stop_pct))
         pnl = pct * entry * size
         fee_close = exit_price * size * self.FEE_RATE
-        net_pnl = pnl - fee_close - trade.get("fee_open", 0)
+        # fee_open was already deducted from equity at entry time,
+        # so only subtract the closing fee here to avoid double-counting.
+        net_pnl = pnl - fee_close
 
         self.equity += net_pnl
 
@@ -214,8 +219,10 @@ class Backtest:
         daily_pnl = sum(
             t["pnl"] for t in self.trades if t["closed_at"][:10] == today
         )
-        if self.equity > 0:
-            return (daily_pnl / self.equity) < -config.MAX_DAILY_LOSS_PCT
+        # Use initial_equity as denominator to match the bot's paper-mode
+        # behaviour which uses PAPER_START_EQUITY (a fixed starting balance).
+        if self.initial_equity > 0:
+            return (daily_pnl / self.initial_equity) < -config.MAX_DAILY_LOSS_PCT
         return False
 
     # ── Summary ───────────────────────────────────────────────────────────────
@@ -272,41 +279,44 @@ class Backtest:
 
 # ── CLI entry point ───────────────────────────────────────────────────────────
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Strategy backtester")
-    parser.add_argument("--symbol", type=str, default="BTCUSDT", help="Binance symbol (e.g. ETHUSDT)")
-    parser.add_argument("--fresh", action="store_true", help="Re-fetch data")
-    parser.add_argument(
-        "--equity", type=float, default=1000.0, help="Starting equity (USDT)"
-    )
-    parser.add_argument("--days", type=int, default=365, help="Days of history")
-    args = parser.parse_args()
+def _run_single(symbol: str, equity: float, days: int, fresh: bool) -> dict | None:
+    """Run backtest for a single symbol.
 
-    symbol_upper = args.symbol.upper()
-    blofin_symbol = symbol_upper.replace("USDT", "-USDT")  # ETHUSDT → ETH-USDT
+    Parameters
+    ----------
+    symbol : str
+        BloFin instrument ID (e.g. ``"BTC-USDT"``).
+    equity : float
+        Starting equity in USDT.
+    days : int
+        Number of days of historical data to use.
+    fresh : bool
+        When True, delete any cached CSV and re-fetch data.
 
-    if args.fresh:
-        csv = Path(__file__).parent / "data" / f"{symbol_upper}_15m.csv"
+    Returns the results dict or None on error.
+    """
+    if fresh:
+        csv = Path(__file__).parent / "data" / f"{symbol}_15m.csv"
         csv.unlink(missing_ok=True)
 
-    df = load_or_fetch(symbol_upper, days=args.days)
+    df = load_or_fetch(symbol, days=days)
     print(f"\nLoaded {len(df)} candles  ({df.index[0]} → {df.index[-1]})\n")
 
-    bt = Backtest(initial_equity=args.equity, symbol=blofin_symbol)
+    bt = Backtest(initial_equity=equity, symbol=symbol)
     results = bt.run(df)
 
     if "error" in results:
-        print(f"ERROR: {results['error']}")
-        return
+        print(f"ERROR ({symbol}): {results['error']}")
+        return None
 
     # Per-symbol params for display
-    sym_params = config.get_symbol_params(blofin_symbol)
+    sym_params = config.get_symbol_params(symbol)
 
     # Pretty print summary
     print("=" * 55)
     print("  BACKTEST RESULTS")
     print("=" * 55)
-    print(f"  Symbol          : {blofin_symbol}")
+    print(f"  Symbol          : {symbol}")
     print(f"  Timeframe       : 15m")
     print(f"  Leverage        : {config.LEVERAGE}x")
     print(f"  Risk/trade      : {config.RISK_PER_TRADE*100:.1f}%")
@@ -325,13 +335,59 @@ def main() -> None:
 
     # Save JSON results
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    out_path = RESULTS_DIR / f"backtest_{symbol_upper}_{ts}.json"
+    out_path = RESULTS_DIR / f"backtest_{symbol}_{ts}.json"
     results_to_save = {k: v for k, v in results.items() if k != "trades"}
-    results_to_save["symbol"] = blofin_symbol
+    results_to_save["symbol"] = symbol
     results_to_save["trades_count"] = len(results.get("trades", []))
     with open(out_path, "w") as f:
         json.dump(results_to_save, f, indent=2)
     print(f"\nResults saved to {out_path}")
+    return results
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Strategy backtester")
+    parser.add_argument("--symbol", type=str, default="BTC-USDT", help="BloFin symbol (e.g. ETH-USDT)")
+    parser.add_argument("--all", action="store_true", help="Run on all supported symbols")
+    parser.add_argument("--fresh", action="store_true", help="Re-fetch data")
+    parser.add_argument(
+        "--equity", type=float, default=1000.0, help="Starting equity (USDT)"
+    )
+    parser.add_argument("--days", type=int, default=365, help="Days of history")
+    args = parser.parse_args()
+
+    if args.all:
+        symbols = list(config.SUPPORTED_SYMBOLS)
+    else:
+        symbols = [args.symbol]
+
+    all_results: list[dict] = []
+    for sym in symbols:
+        result = _run_single(sym, args.equity, args.days, args.fresh)
+        if result is not None:
+            result["symbol"] = sym
+            all_results.append(result)
+
+    if len(all_results) > 1:
+        print("\n")
+        print("=" * 65)
+        print("  COMBINED SUMMARY (all symbols)")
+        print("=" * 65)
+        total_pnl = sum(r["total_pnl"] for r in all_results)
+        total_trades = sum(r["total_trades"] for r in all_results)
+        total_wins = sum(r["wins"] for r in all_results)
+        avg_return = sum(r["return_pct"] for r in all_results) / len(all_results)
+        overall_wr = (total_wins / total_trades * 100) if total_trades > 0 else 0
+
+        for r in all_results:
+            print(f"  {r['symbol']:>10s}  return={r['return_pct']:+6.2f}%  "
+                  f"WR={r['win_rate_pct']:5.1f}%  trades={r['total_trades']:3d}  "
+                  f"DD={r['max_drawdown_pct']:6.2f}%")
+        print("-" * 65)
+        print(f"  {'TOTAL':>10s}  avg_return={avg_return:+6.2f}%  "
+              f"WR={overall_wr:5.1f}%  trades={total_trades:3d}  "
+              f"PnL=${total_pnl:+.2f}")
+        print("=" * 65)
 
 
 if __name__ == "__main__":

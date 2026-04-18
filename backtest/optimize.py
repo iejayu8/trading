@@ -421,20 +421,20 @@ def print_results_table(results: list[dict], top_n: int = 20) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Strategy parameter optimizer")
-    parser.add_argument("--symbol",     type=str, default="BTCUSDT", help="Binance symbol (e.g. ETHUSDT)")
+    parser.add_argument("--symbol",     type=str, default="BTC-USDT", help="BloFin symbol (e.g. ETH-USDT)")
     parser.add_argument("--top",        type=int, default=20, help="Show top N results")
     parser.add_argument("--min-trades", type=int, default=15, help="Minimum trade count")
     parser.add_argument("--fresh",      action="store_true",  help="Re-fetch candle data")
     parser.add_argument("--days",       type=int, default=365, help="Days of history")
     args = parser.parse_args()
 
-    symbol_upper = args.symbol.upper()
+    symbol = args.symbol
 
     if args.fresh:
-        csv = Path(__file__).parent / "data" / f"{symbol_upper}_15m.csv"
+        csv = Path(__file__).parent / "data" / f"{symbol}_15m.csv"
         csv.unlink(missing_ok=True)
 
-    df = load_or_fetch(symbol_upper, days=args.days)
+    df = load_or_fetch(symbol, days=args.days)
     print(f"Loaded {len(df)} candles  ({df.index[0]} → {df.index[-1]})\n")
 
     results = run_grid(df, min_trades=args.min_trades)
@@ -447,7 +447,7 @@ def main() -> None:
 
     # Save full results
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    out_path = RESULTS_DIR / f"optimize_{symbol_upper}_{ts}.json"
+    out_path = RESULTS_DIR / f"optimize_{symbol}_{ts}.json"
     with open(out_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"Full results saved to {out_path}\n")
