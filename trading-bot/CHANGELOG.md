@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.7.20
+- Merge pull request #42 from iejayu8/copilot/custom-strategy-bug-fix
+
 ## 1.7.19
 - fix: relax custom strategy parameters to eliminate zero-signal regime (v8)
 - Strategy v8: ADX_MIN 20→16, RSI_PULLBACK_MAX 46→52, RSI_RECOVERY_LONG 49→55, PULLBACK_LOOKBACK 3→6 bars (90 min)
