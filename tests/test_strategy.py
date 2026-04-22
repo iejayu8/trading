@@ -65,13 +65,14 @@ def make_short_trigger_ohlcv(n: int = 700) -> pd.DataFrame:
     """
     Generate a downtrend dataset specifically designed to trigger SHORT signals.
 
-    The SHORT entry requires ADX≥22, price < EMA-200, ema_slow < ema_trend,
-    RSI spiked ≥58 within the last 4 bars, and RSI now ≤48.  Achieving this
-    with purely random data is not reliable, so we use a deterministic pattern:
-    a persistent downtrend interrupted every 40 bars by a very sharp 2-bar
-    counter-rally (pushing RSI well above 58) followed by an immediate
-    2-bar rejection (pulling RSI back below 48).  This V-shape within 4 bars
-    exactly matches the strategy's lookback requirement.
+    The SHORT entry requires ADX≥ ADX_MIN, price < EMA-200, ema_slow < ema_trend,
+    RSI spiked ≥ RSI_PULLBACK_MIN (48) within the last PULLBACK_LOOKBACK bars,
+    and RSI now ≤ RSI_RECOVERY_SHORT (45).  Achieving this with purely random
+    data is not reliable, so we use a deterministic pattern: a persistent
+    downtrend interrupted every 40 bars by a very sharp 2-bar counter-rally
+    (pushing RSI well above 48) followed by an immediate 2-bar rejection
+    (pulling RSI back below 45).  This V-shape within 4 bars sits well inside
+    the 6-bar PULLBACK_LOOKBACK window.
     """
     np.random.seed(77)
     prices = [80000.0]   # start high so we have room to fall

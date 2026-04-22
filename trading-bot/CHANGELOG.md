@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.19
+- fix: relax custom strategy parameters to eliminate zero-signal regime (v8)
+- Strategy v8: ADX_MIN 20→16, RSI_PULLBACK_MAX 46→52, RSI_RECOVERY_LONG 49→55, PULLBACK_LOOKBACK 3→6 bars (90 min)
+- Per-symbol v8: SOL/XRP ADX 22→18, pullback 44/42→50, recovery 52→53, lookback 5→8; LINK ADX 18→14, pullback 42→50, recovery 52→53, lookback 5→8
+- Root cause: v7 conditions (deep RSI dip within 45 min window) almost never aligned in post-ATH ranging markets, producing zero signals across all 5 symbols over 2+ days
+
 ## 1.7.18
 - Replace Binance API with BloFin API for backtest data fetching
 - Address review comments: rename variable, add docstring params
