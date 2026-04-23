@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.21
+- fix: change default TRADING_MODE from "realtrading" to "papertrading" — bots in realtrading without API credentials had equity=None, blocking all position entries
+- fix: protect _run_loop() db.get_copy_trading_config() call with try/except — an unhandled DB error silently killed the trading loop
+- fix: add BTC-USDT and ETH-USDT per-symbol RSI overrides (pullback_max=60, recovery_long=63) — v8 threshold of 52 prevented LONG signals in strong bull markets (RSI 60–75) where RSI never dips that low
+- fix: invalid TRADING_MODE fallback now defaults to "papertrading" instead of "realtrading"
+
 ## 1.7.20
 - Merge pull request #42 from iejayu8/copilot/custom-strategy-bug-fix
 
