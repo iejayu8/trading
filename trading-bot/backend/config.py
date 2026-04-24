@@ -94,14 +94,14 @@ if MAX_SYMBOL_EXPOSURE_PCT <= 0 or MAX_SYMBOL_EXPOSURE_PCT > 1:
     MAX_SYMBOL_EXPOSURE_PCT = 0.50
 
 TRADING_MARGIN_MODE: str = _env_str("TRADING_MARGIN_MODE", "isolated").lower()
-TRADING_MODE: str = _env_str("TRADING_MODE", "realtrading").lower()
+TRADING_MODE: str = _env_str("TRADING_MODE", "papertrading").lower()
 PAPER_START_EQUITY: float = _env_float("PAPER_START_EQUITY", 1000.0)
 
 if TRADING_MARGIN_MODE not in {"cross", "isolated"}:
     TRADING_MARGIN_MODE = "isolated"
 
 if TRADING_MODE not in {"papertrading", "realtrading"}:
-    TRADING_MODE = "realtrading"
+    TRADING_MODE = "papertrading"
     LEVERAGE = 1
 elif LEVERAGE > 125:
     LEVERAGE = 125
@@ -145,19 +145,26 @@ SUPPORTED_SYMBOLS: list[str] = [
 SYMBOL_PARAMS: dict[str, dict] = {
     # BTC-USDT: v7 grid-search (365-day 15m data).
     # +20.17% return, WR=48.6%, MaxDD=-7.07%
-    # v8: uses relaxed module-level defaults (ADX=16, pullback=52, recovery=55, lookback=6)
+    # v8: relaxed module-level defaults; per-symbol RSI thresholds widened for
+    # bull-market regimes where RSI rarely dips below 52.
     "BTC-USDT": {
-        "stop_loss_pct":   STOP_LOSS_PCT,   # 2.5%
-        "take_profit_pct": TAKE_PROFIT_PCT,  # 4.0%
+        "stop_loss_pct":    STOP_LOSS_PCT,   # 2.5%
+        "take_profit_pct":  TAKE_PROFIT_PCT,  # 4.0%
+        "rsi_pullback_max": 60.0,  # raised from 52: catches shallow bull-market dips (RSI 60-75)
+        "rsi_recovery_long": 63.0,  # raised from 55: maintains 3-pt gap above new pullback threshold
+        "pullback_lookback": 6,
     },
     # ETH-USDT: grid-search (365-day 15m data).
     # ETH benefits from tighter SL and wider TP: sharp momentum bursts with
     # cleaner moves than BTC noise.
     # +25.63% return, WR=31.6%, MaxDD=-6.49%
-    # v8: uses relaxed module-level defaults for signal params
+    # v8: same bull-market RSI widening as BTC.
     "ETH-USDT": {
-        "stop_loss_pct":   0.015,   # 1.5% — tighter than BTC (ETH moves more cleanly)
-        "take_profit_pct": 0.070,   # 7.0% — wider to capture ETH momentum bursts
+        "stop_loss_pct":    0.015,   # 1.5% — tighter than BTC (ETH moves more cleanly)
+        "take_profit_pct":  0.070,   # 7.0% — wider to capture ETH momentum bursts
+        "rsi_pullback_max": 60.0,  # raised from 52: bull-market dip detection
+        "rsi_recovery_long": 63.0,  # raised from 55: 3-pt gap above pullback threshold
+        "pullback_lookback": 6,
     },
     # SOL-USDT: grid-search (365-day 15m data).
     # v8: Relaxed from v7 per-symbol params to generate more signals.

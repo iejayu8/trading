@@ -1,6 +1,6 @@
 {
   "name": "Trading Bot",
-  "version": "1.7.20",
+  "version": "1.7.21",
   "slug": "trading_bot",
   "description": "Run the BloFin trading bot and dashboard inside Home Assistant",
   "startup": "application",

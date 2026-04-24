@@ -145,7 +145,11 @@ class TradingBot:
         db.log_event("Trading loop started")
         while self._running:
             # Re-read copy trading flag so mode switches take effect immediately.
-            ct = db.get_copy_trading_config()
+            try:
+                ct = db.get_copy_trading_config()
+            except Exception as exc:  # noqa: BLE001
+                db.log_event(f"Failed to read copy trading config: {exc}", level="WARNING")
+                ct = {}
             copy_active = ct.get("enabled", False) and bool(ct.get("trader_id", ""))
 
             if copy_active:
