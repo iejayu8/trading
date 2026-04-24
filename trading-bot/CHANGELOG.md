@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.23
+- fix: update `test_trading_mode_invalid_resets_leverage` to expect `"papertrading"` fallback (was `"realtrading"`)
+- fix: copy trading fallback in `_run_loop()` now uses last known state instead of `{}` — prevents inadvertent mode switch to custom strategy on transient DB errors
+- fix: update `make_short_trigger_ohlcv` test fixture with percentage-based moves — old fixture produced RSI values below the 48 threshold (RSI_PULLBACK_MIN), causing SHORT signal test to fail
+- fix: backtest `trade["pnl"]` now includes opening fee so `sum(trade["pnl"]) ≈ final_equity − initial_equity` (equity conservation)
+
 ## 1.7.22
 - fix: resolve bugs preventing position opening + bump version to 1.7.21
 - Initial plan

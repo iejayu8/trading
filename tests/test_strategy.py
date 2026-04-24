@@ -67,28 +67,31 @@ def make_short_trigger_ohlcv(n: int = 700) -> pd.DataFrame:
 
     The SHORT entry requires ADX≥ ADX_MIN, price < EMA-200, ema_slow < ema_trend,
     RSI spiked ≥ RSI_PULLBACK_MIN (48) within the last PULLBACK_LOOKBACK bars,
-    and RSI now ≤ RSI_RECOVERY_SHORT (45).  Achieving this with purely random
-    data is not reliable, so we use a deterministic pattern: a persistent
-    downtrend interrupted every 40 bars by a very sharp 2-bar counter-rally
-    (pushing RSI well above 48) followed by an immediate 2-bar rejection
-    (pulling RSI back below 45).  This V-shape within 4 bars sits well inside
-    the 6-bar PULLBACK_LOOKBACK window.
+    and RSI now ≤ RSI_RECOVERY_SHORT (45).
+
+    Design: 220-bar downtrend warmup to establish the trend context, then a
+    deterministic 4-bar spike (+2.5% × 4 bars, pushing RSI well above 48)
+    followed by a 4-bar rejection (-3% × 4 bars, pulling RSI below 45).
+    This V-shape within 8 bars sits well inside the 6-bar PULLBACK_LOOKBACK
+    window once the rejection completes and guarantees the SHORT conditions
+    are met without relying on random noise.
     """
     np.random.seed(77)
-    prices = [80000.0]   # start high so we have room to fall
+    prices = [40000.0]
     for i in range(n - 1):
-        phase = i % 40
-        if phase == 20:      # bar 1 of sharp counter-rally
-            step = 600
-        elif phase == 21:    # bar 2 of counter-rally
-            step = 400
-        elif phase == 22:    # bar 1 of rejection
-            step = -700
-        elif phase == 23:    # bar 2 of rejection
-            step = -500
-        else:                # normal downtrend bar
-            step = np.random.normal(-200, 80)
-        prices.append(max(100, prices[-1] + step))
+        if i < 220:
+            # Downtrend warmup: establishes macro downtrend and high ADX
+            step = np.random.normal(-70, 30)
+        elif i < 224:
+            # 4-bar counter-rally: pushes RSI above RSI_PULLBACK_MIN (48)
+            step = prices[-1] * 0.025
+        elif i < 228:
+            # 4-bar rejection: pulls RSI back below RSI_RECOVERY_SHORT (45)
+            step = -prices[-1] * 0.03
+        else:
+            # Continue downtrend
+            step = np.random.normal(-70, 30)
+        prices.append(max(5000, prices[-1] + step))
 
     df = pd.DataFrame(
         {

@@ -199,13 +199,18 @@ class Backtest:
 
         self.equity += net_pnl
 
+        # The full net P&L reported per-trade includes both fees so that
+        # sum(trade["pnl"]) equals final_equity – initial_equity (within
+        # rounding noise).
+        full_net_pnl = net_pnl - trade.get("fee_open", 0)
+
         self.trades.append(
             {
                 "direction": direction,
                 "entry_price": entry,
                 "exit_price": exit_price,
                 "size": size,
-                "pnl": round(net_pnl, 4),
+                "pnl": round(full_net_pnl, 4),
                 "reason": reason,
                 "opened_at": trade["opened_at"],
                 "closed_at": closed_at,
