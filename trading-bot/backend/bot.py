@@ -147,10 +147,15 @@ class TradingBot:
             # Re-read copy trading flag so mode switches take effect immediately.
             try:
                 ct = db.get_copy_trading_config()
+                self._copy_trading = bool(ct.get("enabled", False))
+                self._copy_trader_id = ct.get("trader_id", "")
             except Exception as exc:  # noqa: BLE001
                 db.log_event(f"Failed to read copy trading config: {exc}", level="WARNING")
-                ct = {}
-            copy_active = ct.get("enabled", False) and bool(ct.get("trader_id", ""))
+                ct = {
+                    "enabled": self._copy_trading,
+                    "trader_id": self._copy_trader_id,
+                }
+            copy_active = bool(ct.get("enabled", False)) and bool(ct.get("trader_id", ""))
 
             if copy_active:
                 # Fast 5-second polling – lightweight check that skips candle
