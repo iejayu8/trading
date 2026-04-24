@@ -202,7 +202,7 @@ class TestConfigModuleLevelGuards:
 
     def test_trading_mode_invalid_resets_leverage(self, monkeypatch):
         self._reload_config(monkeypatch, {"TRADING_MODE": "badmode"})
-        assert config.TRADING_MODE == "realtrading"
+        assert config.TRADING_MODE == "papertrading"
         assert config.LEVERAGE == 1
 
     def test_leverage_capped_at_125(self, monkeypatch):
