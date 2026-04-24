@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.22
+- fix: resolve bugs preventing position opening + bump version to 1.7.21
+- Initial plan
+
 ## 1.7.21
 - fix: change default TRADING_MODE from "realtrading" to "papertrading" — bots in realtrading without API credentials had equity=None, blocking all position entries
 - fix: protect _run_loop() db.get_copy_trading_config() call with try/except — an unhandled DB error silently killed the trading loop
