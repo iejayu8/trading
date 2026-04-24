@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.24
+- Initial plan
+- fix: update tests, copy-trading fallback, backtest equity conservation, bump version to 1.7.23
+- Initial plan
+
 ## 1.7.23
 - fix: update `test_trading_mode_invalid_resets_leverage` to expect `"papertrading"` fallback (was `"realtrading"`)
 - fix: copy trading fallback in `_run_loop()` now uses last known state instead of `{}` — prevents inadvertent mode switch to custom strategy on transient DB errors
