@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.26
+- fix: document live optimizer baseline
+- fix: polish changelog and optimizer naming
+- fix: address validation feedback
+
 ## 1.7.25
 - fix: preserve the last known copy-trading state in `start()`, `_tick()`, `_tick_copy_only()`, and `_run_loop()` when reading DB config fails — transient DB errors no longer disable mirroring or bypass the intended entry path
 - fix: align frontend/default trading-mode fallbacks with `papertrading` so the dashboard no longer boots showing the stale real-trading state that previously blocked entries without credentials
