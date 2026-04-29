@@ -1,9 +1,12 @@
 # Changelog
 
+## 1.7.25
+- fix: preserve the last known copy-trading state in `start()`, `_tick()`, `_tick_copy_only()`, and `_run_loop()` when reading DB config fails — transient DB errors no longer disable mirroring or bypass the intended entry path
+- fix: align frontend/default trading-mode fallbacks with `papertrading` so the dashboard no longer boots showing the stale real-trading state that previously blocked entries without credentials
+- fix: align `backtest/optimize.py` with the live strategy by using ATR-normalised MACD gates, shared volume thresholds, and v8-era search ranges/baselines
+
 ## 1.7.24
-- Initial plan
-- fix: update tests, copy-trading fallback, backtest equity conservation, bump version to 1.7.23
-- Initial plan
+- chore: bump version to 1.7.24
 
 ## 1.7.23
 - fix: update `test_trading_mode_invalid_resets_leverage` to expect `"papertrading"` fallback (was `"realtrading"`)
