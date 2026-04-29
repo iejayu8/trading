@@ -5,9 +5,6 @@
 - fix: align frontend/default trading-mode fallbacks with `papertrading` so the dashboard no longer boots showing the stale real-trading state that previously blocked entries without credentials
 - fix: align `backtest/optimize.py` with the live strategy by using ATR-normalised MACD gates, shared volume thresholds, and v8-era search ranges/baselines
 
-## 1.7.24
-- chore: bump version to 1.7.24
-
 ## 1.7.23
 - fix: update `test_trading_mode_invalid_resets_leverage` to expect `"papertrading"` fallback (was `"realtrading"`)
 - fix: copy trading fallback in `_run_loop()` now uses last known state instead of `{}` — prevents inadvertent mode switch to custom strategy on transient DB errors

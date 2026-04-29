@@ -183,11 +183,11 @@ def _run_fast(
         rsi_recovered      = rsi[i] >= rsi_rc_long
         price_above_ema9   = close[i] > ema_fast[i]
         atr_val            = atr[i] if not np.isnan(atr[i]) and atr[i] > 0 else None
-        macd_gate          = (
+        macd_threshold     = (
             strategy.MACD_GATE_ATR_MULT * atr_val
             if atr_val is not None else None
         )
-        macd_ok_long       = True if macd_gate is None else macd_hist[i] >= -macd_gate
+        macd_ok_long       = True if macd_threshold is None else macd_hist[i] >= -macd_threshold
         vol_ok             = (not np.isnan(vol_sma[i])) and volume[i] >= strategy.VOLUME_MULT * vol_sma[i]
 
         if (price_above_ema200 and ema21_above_ema55 and recent_pb_long
@@ -200,7 +200,7 @@ def _run_fast(
             recent_pb_short    = np.any(rsi_window >= rsi_pb_min)
             rsi_rejected       = rsi[i] <= rsi_rc_short
             price_below_ema9   = close[i] < ema_fast[i]
-            macd_ok_short      = True if macd_gate is None else macd_hist[i] <= macd_gate
+            macd_ok_short      = True if macd_threshold is None else macd_hist[i] <= macd_threshold
 
             if (price_below_ema200 and ema21_below_ema55 and recent_pb_short
                     and rsi_rejected and price_below_ema9 and macd_ok_short and vol_ok):
