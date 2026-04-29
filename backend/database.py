@@ -57,7 +57,7 @@ except ImportError:
     _startup_config = _importlib.import_module("config")
 
 DB_PATH = _mode_db_path(
-    getattr(_startup_config, "TRADING_MODE", "realtrading"),
+    getattr(_startup_config, "TRADING_MODE", "papertrading"),
     getattr(_startup_config, "COPY_TRADING_ENABLED", False),
 )
 
