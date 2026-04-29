@@ -52,6 +52,10 @@ def _make_raw_candles(n=200, start_price=50000.0):
     return candles
 
 
+def _raise_runtime_error(message: str = "db down"):
+    raise RuntimeError(message)
+
+
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 @pytest.fixture(autouse=True)
@@ -436,7 +440,7 @@ class TestTickBranchesToCopyTrading:
         monkeypatch.setattr(bot._client, "get_candles", lambda *a, **kw: raw)
         bot._copy_trading = True
         bot._copy_trader_id = "leader1"
-        monkeypatch.setattr(db, "get_copy_trading_config", lambda: (_ for _ in ()).throw(RuntimeError("db down")))
+        monkeypatch.setattr(db, "get_copy_trading_config", lambda: _raise_runtime_error())
 
         copy_called = {"n": 0}
         monkeypatch.setattr(bot, "_tick_copy_trading", lambda *a, **k: copy_called.update(n=copy_called["n"] + 1))
@@ -578,7 +582,7 @@ class TestTickCopyOnly:
         """DB errors keep the last enabled copy-trading state instead of disabling it."""
         bot = self._make_bot(monkeypatch)
         monkeypatch.setattr(bot._client, "get_ticker", lambda s: {"last": "50000"})
-        monkeypatch.setattr(db, "get_copy_trading_config", lambda: (_ for _ in ()).throw(RuntimeError("db down")))
+        monkeypatch.setattr(db, "get_copy_trading_config", lambda: _raise_runtime_error())
 
         copy_calls = {"n": 0}
         monkeypatch.setattr(bot, "_tick_copy_trading", lambda *a, **k: copy_calls.update(n=copy_calls["n"] + 1))
