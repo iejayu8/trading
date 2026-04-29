@@ -61,7 +61,9 @@ PARAM_GRID: dict[str, list] = {
     "TAKE_PROFIT_PCT":     [0.040, 0.055, 0.070],
 }
 
-# Baseline (current live strategy defaults) – used for display only
+# Baseline (current live strategy defaults) – used for display only.
+# These values intentionally reference the runtime strategy/config modules so
+# optimizer output stays aligned with the live bot after future parameter tweaks.
 BASELINE: dict[str, float] = {
     "ADX_MIN":           strategy.ADX_MIN,
     "RSI_PULLBACK_MAX":  strategy.RSI_PULLBACK_MAX,
@@ -71,6 +73,13 @@ BASELINE: dict[str, float] = {
     "STOP_LOSS_PCT":     config.STOP_LOSS_PCT,
     "TAKE_PROFIT_PCT":   config.TAKE_PROFIT_PCT,
 }
+
+
+def _macd_threshold_for_atr(atr_value: float) -> float | None:
+    """Return the ATR-scaled MACD threshold for one bar, or None when unavailable."""
+    if np.isnan(atr_value) or atr_value <= 0:
+        return None
+    return strategy.MACD_GATE_ATR_MULT * atr_value
 
 
 # ── Fast inline backtester ────────────────────────────────────────────────────
@@ -182,11 +191,7 @@ def _run_fast(
         recent_pb_long     = np.any(rsi_window <= rsi_pb_max)
         rsi_recovered      = rsi[i] >= rsi_rc_long
         price_above_ema9   = close[i] > ema_fast[i]
-        atr_val            = atr[i] if not np.isnan(atr[i]) and atr[i] > 0 else None
-        macd_threshold     = (
-            strategy.MACD_GATE_ATR_MULT * atr_val
-            if atr_val is not None else None
-        )
+        macd_threshold     = _macd_threshold_for_atr(atr[i])
         macd_ok_long       = True if macd_threshold is None else macd_hist[i] >= -macd_threshold
         vol_ok             = (not np.isnan(vol_sma[i])) and volume[i] >= strategy.VOLUME_MULT * vol_sma[i]
 
