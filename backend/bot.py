@@ -90,6 +90,27 @@ class TradingBot:
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
+    def _read_copy_trading_config(self, source: str) -> dict:
+        """Return copy-trading config, preserving last-known state on DB errors."""
+        try:
+            ct = db.get_copy_trading_config()
+        except Exception as exc:  # noqa: BLE001
+            db.log_event(
+                f"Failed to read copy trading config ({source}): {exc}",
+                level="WARNING",
+            )
+            return {
+                "enabled": bool(self._copy_trading),
+                "trader_id": self._copy_trader_id,
+            }
+
+        self._copy_trading = bool(ct.get("enabled", False))
+        self._copy_trader_id = ct.get("trader_id", "") or ""
+        return {
+            "enabled": self._copy_trading,
+            "trader_id": self._copy_trader_id,
+        }
+
     def start(self) -> None:
         with self._lock:
             if self._running:
@@ -98,9 +119,7 @@ class TradingBot:
             self._stop_event.clear()
         # Refresh copy trading settings from DB so runtime changes take effect
         # without requiring a server restart.
-        ct = db.get_copy_trading_config()
-        self._copy_trading = ct.get("enabled", False)
-        self._copy_trader_id = ct.get("trader_id", "") or ""
+        ct = self._read_copy_trading_config("start")
         if self._copy_trading and self._copy_trader_id:
             db.log_event(
                 f"Copy trading ENABLED for {self.symbol} (trader: {self._copy_trader_id})"
@@ -145,16 +164,7 @@ class TradingBot:
         db.log_event("Trading loop started")
         while self._running:
             # Re-read copy trading flag so mode switches take effect immediately.
-            try:
-                ct = db.get_copy_trading_config()
-                self._copy_trading = bool(ct.get("enabled", False))
-                self._copy_trader_id = ct.get("trader_id", "")
-            except Exception as exc:  # noqa: BLE001
-                db.log_event(f"Failed to read copy trading config: {exc}", level="WARNING")
-                ct = {
-                    "enabled": self._copy_trading,
-                    "trader_id": self._copy_trader_id,
-                }
+            ct = self._read_copy_trading_config("run_loop")
             copy_active = bool(ct.get("enabled", False)) and bool(ct.get("trader_id", ""))
 
             if copy_active:
@@ -235,9 +245,7 @@ class TradingBot:
             )
 
         # ── Re-read copy config (supports runtime toggling) ─────────────────
-        ct = db.get_copy_trading_config()
-        self._copy_trading = ct.get("enabled", False)
-        self._copy_trader_id = ct.get("trader_id", "") or ""
+        ct = self._read_copy_trading_config("copy_tick")
 
         if self._copy_trading and self._copy_trader_id:
             self._tick_copy_trading(open_trades, exchange_has_pos, last_price, equity)
@@ -336,9 +344,7 @@ class TradingBot:
         # ── Generate signal ───────────────────────────────────────────────────
         # Re-read copy trading config each tick so runtime changes take effect
         # within one candle cycle without needing a bot restart.
-        ct = db.get_copy_trading_config()
-        self._copy_trading = ct.get("enabled", False)
-        self._copy_trader_id = ct.get("trader_id", "") or ""
+        ct = self._read_copy_trading_config("strategy_tick")
 
         if self._copy_trading and self._copy_trader_id:
             self._tick_copy_trading(open_trades, exchange_has_pos, last_price, equity)

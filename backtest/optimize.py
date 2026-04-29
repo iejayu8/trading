@@ -47,13 +47,13 @@ FEE_RATE  = 0.0006  # 0.06 % taker fee
 PARAM_GRID: dict[str, list] = {
     # Entry signal parameters (in strategy.py)
     # ADX: lower = more trades but noisier; higher = fewer, cleaner
-    "ADX_MIN":             [18.0, 20.0, 22.0, 25.0],
+    "ADX_MIN":             [14.0, 16.0, 18.0, 20.0],
     # RSI pullback depth: how oversold must the dip be
-    "RSI_PULLBACK_MAX":    [38.0, 42.0, 46.0],
+    "RSI_PULLBACK_MAX":    [46.0, 50.0, 52.0, 56.0, 60.0],
     # RSI recovery: how much must RSI recover before entry
-    "RSI_RECOVERY_LONG":   [49.0, 52.0, 55.0],
+    "RSI_RECOVERY_LONG":   [53.0, 55.0, 58.0, 60.0, 63.0],
     # Lookback: freshness of the pullback signal
-    "PULLBACK_LOOKBACK":   [3, 4, 6],
+    "PULLBACK_LOOKBACK":   [4, 6, 8],
     # Cooldown: bars between signals (24=6h, 36=9h, 48=12h)
     "SIGNAL_COOLDOWN":     [24, 36, 48],
     # Risk management parameters (in config.py)
@@ -61,15 +61,15 @@ PARAM_GRID: dict[str, list] = {
     "TAKE_PROFIT_PCT":     [0.040, 0.055, 0.070],
 }
 
-# Baseline (current v6) values – used for display only
+# Baseline (current live strategy defaults) – used for display only
 BASELINE: dict[str, float] = {
-    "ADX_MIN":           22.0,
-    "RSI_PULLBACK_MAX":  42.0,
-    "RSI_RECOVERY_LONG": 52.0,
-    "PULLBACK_LOOKBACK": 4,
-    "SIGNAL_COOLDOWN":   48,
-    "STOP_LOSS_PCT":     0.020,
-    "TAKE_PROFIT_PCT":   0.045,
+    "ADX_MIN":           strategy.ADX_MIN,
+    "RSI_PULLBACK_MAX":  strategy.RSI_PULLBACK_MAX,
+    "RSI_RECOVERY_LONG": strategy.RSI_RECOVERY_LONG,
+    "PULLBACK_LOOKBACK": strategy.PULLBACK_LOOKBACK,
+    "SIGNAL_COOLDOWN":   strategy.SIGNAL_COOLDOWN,
+    "STOP_LOSS_PCT":     config.STOP_LOSS_PCT,
+    "TAKE_PROFIT_PCT":   config.TAKE_PROFIT_PCT,
 }
 
 
@@ -107,6 +107,7 @@ def _run_fast(
     ema_trend = arrays["ema_trend"]
     ema_200   = arrays["ema_200"]
     macd_hist = arrays["macd_hist"]
+    atr       = arrays["atr"]
     volume    = arrays["volume"]
     vol_sma   = arrays["volume_sma"]
     ema_slow_gt_trend = ema_slow > ema_trend  # pre-computed boolean array
@@ -181,8 +182,10 @@ def _run_fast(
         recent_pb_long     = np.any(rsi_window <= rsi_pb_max)
         rsi_recovered      = rsi[i] >= rsi_rc_long
         price_above_ema9   = close[i] > ema_fast[i]
-        macd_ok_long       = macd_hist[i] >= -50
-        vol_ok             = (not np.isnan(vol_sma[i])) and volume[i] >= 0.9 * vol_sma[i]
+        atr_val            = atr[i] if not np.isnan(atr[i]) and atr[i] > 0 else np.inf
+        macd_gate          = strategy.MACD_GATE_ATR_MULT * atr_val
+        macd_ok_long       = macd_hist[i] >= -macd_gate
+        vol_ok             = (not np.isnan(vol_sma[i])) and volume[i] >= strategy.VOLUME_MULT * vol_sma[i]
 
         if (price_above_ema200 and ema21_above_ema55 and recent_pb_long
                 and rsi_recovered and price_above_ema9 and macd_ok_long and vol_ok):
@@ -194,7 +197,7 @@ def _run_fast(
             recent_pb_short    = np.any(rsi_window >= rsi_pb_min)
             rsi_rejected       = rsi[i] <= rsi_rc_short
             price_below_ema9   = close[i] < ema_fast[i]
-            macd_ok_short      = macd_hist[i] <= 50
+            macd_ok_short      = macd_hist[i] <= macd_gate
 
             if (price_below_ema200 and ema21_below_ema55 and recent_pb_short
                     and rsi_rejected and price_below_ema9 and macd_ok_short and vol_ok):
@@ -311,6 +314,7 @@ def run_grid(df: pd.DataFrame, min_trades: int = 15) -> list[dict]:
         "ema_trend":  df_ind["ema_trend"].to_numpy(float),
         "ema_200":    df_ind["ema_200"].to_numpy(float),
         "macd_hist":  df_ind["macd_hist"].to_numpy(float),
+        "atr":        df_ind["atr"].to_numpy(float),
         "volume":     df_ind["volume"].to_numpy(float),
         "volume_sma": df_ind["volume_sma"].to_numpy(float),
     }
@@ -410,7 +414,7 @@ def print_results_table(results: list[dict], top_n: int = 20) -> None:
         print(row)
 
     print("=" * len(header))
-    print(f"\n  BASELINE (v6):  ADX={BASELINE['ADX_MIN']:.1f}  "
+    print(f"\n  BASELINE (live):  ADX={BASELINE['ADX_MIN']:.1f}  "
           f"RSI_PB={BASELINE['RSI_PULLBACK_MAX']:.1f}  "
           f"RSI_RC={BASELINE['RSI_RECOVERY_LONG']:.1f}  "
           f"LB={BASELINE['PULLBACK_LOOKBACK']}  "
@@ -467,4 +471,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

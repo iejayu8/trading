@@ -427,6 +427,33 @@ class TestTickBranchesToCopyTrading:
 
         assert generate_signal_called["n"] == 1
 
+    def test_tick_preserves_last_known_copy_state_on_db_error(self, monkeypatch):
+        monkeypatch.setattr(config, "TRADING_MODE", "papertrading")
+        monkeypatch.setattr(config, "PAPER_START_EQUITY", 10000.0)
+        bot = TradingBot(symbol="BTC-USDT")
+
+        raw = _make_raw_candles(200)
+        monkeypatch.setattr(bot._client, "get_candles", lambda *a, **kw: raw)
+        bot._copy_trading = True
+        bot._copy_trader_id = "leader1"
+        monkeypatch.setattr(db, "get_copy_trading_config", lambda: (_ for _ in ()).throw(RuntimeError("db down")))
+
+        copy_called = {"n": 0}
+        monkeypatch.setattr(bot, "_tick_copy_trading", lambda *a, **k: copy_called.update(n=copy_called["n"] + 1))
+
+        import bot as bot_module
+        generate_signal_called = {"n": 0}
+        monkeypatch.setattr(
+            bot_module,
+            "generate_signal",
+            lambda *a, **kw: generate_signal_called.update(n=generate_signal_called["n"] + 1) or Signal.NONE,
+        )
+
+        bot._tick()
+
+        assert copy_called["n"] == 1
+        assert generate_signal_called["n"] == 0
+
 
 # ── Bot.start() loads copy trading config ─────────────────────────────────────
 
@@ -546,6 +573,19 @@ class TestTickCopyOnly:
         monkeypatch.setattr(bot, "_tick_copy_trading", lambda *a, **k: copy_calls.update(n=copy_calls["n"] + 1))
         bot._tick_copy_only()
         assert copy_calls["n"] == 0
+
+    def test_preserves_last_known_copy_state_on_db_error(self, monkeypatch):
+        """DB errors keep the last enabled copy-trading state instead of disabling it."""
+        bot = self._make_bot(monkeypatch)
+        monkeypatch.setattr(bot._client, "get_ticker", lambda s: {"last": "50000"})
+        monkeypatch.setattr(db, "get_copy_trading_config", lambda: (_ for _ in ()).throw(RuntimeError("db down")))
+
+        copy_calls = {"n": 0}
+        monkeypatch.setattr(bot, "_tick_copy_trading", lambda *a, **k: copy_calls.update(n=copy_calls["n"] + 1))
+
+        bot._tick_copy_only()
+
+        assert copy_calls["n"] == 1
 
     def test_opens_trade_via_copy_only(self, monkeypatch):
         """End-to-end: _tick_copy_only mirrors a new lead position."""
