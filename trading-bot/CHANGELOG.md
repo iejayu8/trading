@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.37
+- fix: apply after parameter fix to trading-bot/backend/exchange.py to unblock Collecting candles (100/200)
+- Initial plan
+
 ## 1.7.36
 - fix: actually apply `_bar_to_ms` helper and `after` parameter to `history-candles` in `trading-bot/backend/exchange.py`; previous fixes (1.7.34, 1.7.35) only updated the root `backend/exchange.py` copy, leaving the deployed bot still stuck at "Collecting candles (100/200)"
 
