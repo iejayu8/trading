@@ -102,6 +102,7 @@ except ImportError:
 
 SIGNAL_COOLDOWN = 24
 MIN_BARS_REQUIRED = 200
+MIN_POSITION_SIZE = 0.001  # smallest allowed position size (contract units)
 # Minimum bars between signal generation (~6 h on 15-min chart).
 # Halved from 48 to 24 (v7): 6-hour cooldown doubles trade frequency without
 # materially increasing correlated losses, since ADX/RSI filters still gate quality.
@@ -457,7 +458,6 @@ def get_signal_checks(df: pd.DataFrame, sym_params: dict | None = None) -> dict:
 def calculate_position_size(
     equity: float,
     entry_price: float,
-    leverage: int = None,
     risk_pct: float = None,
     stop_loss_pct: float = None,
 ) -> float:
@@ -466,16 +466,17 @@ def calculate_position_size(
 
     size = (equity × risk_pct) / (entry_price × stop_loss_pct)
     """
-    if leverage is None:
-        leverage = config.LEVERAGE
     if risk_pct is None:
         risk_pct = config.RISK_PER_TRADE
     if stop_loss_pct is None:
         stop_loss_pct = config.STOP_LOSS_PCT
 
     risk_amount = equity * risk_pct
-    size        = risk_amount / (entry_price * stop_loss_pct)
-    return max(round(size, 4), 0.001)
+    denominator = entry_price * stop_loss_pct
+    if denominator <= 0:
+        return MIN_POSITION_SIZE
+    size        = risk_amount / denominator
+    return max(round(size, 4), MIN_POSITION_SIZE)
 
 
 def calculate_sl_tp(

@@ -262,6 +262,30 @@ def get_trade_history(symbol: str | None = None, limit: int = 100) -> list[dict]
     return [dict(r) for r in rows]
 
 
+def get_daily_pnl(date_iso: str) -> float:
+    """Return the total realised PnL for all closed trades on *date_iso* (YYYY-MM-DD).
+
+    Uses a range comparison on ``closed_at`` so the query can use an index
+    instead of a full-table LIKE scan.  ``date_iso`` must be in YYYY-MM-DD
+    format; the next calendar day is computed for the upper bound.
+    """
+    from datetime import date, timedelta
+
+    next_day = (date.fromisoformat(date_iso) + timedelta(days=1)).isoformat()
+    with _db() as conn:
+        row = conn.execute(
+            """
+            SELECT COALESCE(SUM(pnl), 0) AS daily_pnl
+            FROM trades
+            WHERE status = 'CLOSED'
+              AND closed_at >= ?
+              AND closed_at < ?
+            """,
+            (date_iso, next_day),
+        ).fetchone()
+    return float(row["daily_pnl"]) if row else 0.0
+
+
 def get_trade_stats(symbol: str | None = None) -> dict:
     with _db() as conn:
         if symbol:
@@ -270,7 +294,7 @@ def get_trade_stats(symbol: str | None = None) -> dict:
                 SELECT
                     COUNT(*)                                     AS total,
                     SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END)   AS wins,
-                    SUM(CASE WHEN pnl <= 0 THEN 1 ELSE 0 END)  AS losses,
+                    SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END)   AS losses,
                     COALESCE(SUM(pnl), 0)                       AS total_pnl,
                     COALESCE(AVG(pnl), 0)                       AS avg_pnl,
                     COALESCE(MAX(pnl), 0)                       AS best_trade,
@@ -286,7 +310,7 @@ def get_trade_stats(symbol: str | None = None) -> dict:
                 SELECT
                     COUNT(*)                                     AS total,
                     SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END)   AS wins,
-                    SUM(CASE WHEN pnl <= 0 THEN 1 ELSE 0 END)  AS losses,
+                    SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END)   AS losses,
                     COALESCE(SUM(pnl), 0)                       AS total_pnl,
                     COALESCE(AVG(pnl), 0)                       AS avg_pnl,
                     COALESCE(MAX(pnl), 0)                       AS best_trade,

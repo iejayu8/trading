@@ -76,7 +76,7 @@ class BloFinClient:
         url = self.BASE_URL + signed_path
         nonce = str(uuid4())
         headers = self._headers("GET", signed_path, nonce)
-        resp = self._session.get(url, headers=headers, timeout=10)
+        resp = self._session.get(url, headers=headers, timeout=(5, 10))
         resp.raise_for_status()
         return resp.json()
 
@@ -85,7 +85,7 @@ class BloFinClient:
         nonce = str(uuid4())
         headers = self._headers("POST", path, nonce, body)
         url = self.BASE_URL + path
-        resp = self._session.post(url, headers=headers, data=body, timeout=10)
+        resp = self._session.post(url, headers=headers, data=body, timeout=(5, 10))
         resp.raise_for_status()
         return resp.json()
 
@@ -110,14 +110,20 @@ class BloFinClient:
         path = "/api/v1/market/history-candles"
         all_candles: list[list] = []
         remaining = limit
-        before_ts: int | None = None
+        # Seed with current time so the first request always includes the
+        # ``before`` parameter – the history-candles endpoint returns an empty
+        # response when ``before`` is omitted.
+        before_ts: int = int(time.time() * 1000)
 
         while remaining > 0:
             batch_size = min(remaining, BLOFIN_MAX)
-            params: dict[str, Any] = {"instId": symbol, "bar": bar, "limit": batch_size}
-            if before_ts is not None:
+            params: dict[str, Any] = {
+                "instId": symbol,
+                "bar": bar,
+                "limit": batch_size,
                 # Return candles with timestamp strictly older than before_ts
-                params["before"] = str(before_ts)
+                "before": str(before_ts),
+            }
 
             batch = self._get(path, params).get("data", [])
             if not batch:

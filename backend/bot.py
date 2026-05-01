@@ -451,7 +451,11 @@ class TradingBot:
 
         for t in all_open:
             notional = t["size"] * t["entry_price"]
-            margin = notional / self.leverage
+            # Use the leverage recorded when the trade was opened, not the
+            # current bot's leverage, so cross-symbol positions are sized
+            # correctly.
+            trade_lev = t.get("leverage") or self.leverage
+            margin = notional / trade_lev
             # Risk = distance from entry to SL × size
             risk = t["size"] * abs(t["entry_price"] - t["sl_price"])
             total_notional += notional
@@ -784,13 +788,9 @@ class TradingBot:
         so the threshold is stable even when unrealised PnL fluctuates.
         """
         today = datetime.now(timezone.utc).date().isoformat()
-        # Portfolio-wide: all symbols' trades for today
-        trades = db.get_trade_history(symbol=None, limit=200)
-        daily_pnl = sum(
-            t["pnl"] or 0
-            for t in trades
-            if (t.get("closed_at") or "").startswith(today)
-        )
+        # Portfolio-wide: use a date-scoped DB query so active portfolios with
+        # more than a few hundred daily trades don't silently under-report.
+        daily_pnl = db.get_daily_pnl(today)
         # Use a stable denominator: paper start equity for paper mode,
         # current equity for real mode (best available proxy).
         denom = (
