@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.7.31
+- Merge pull request #48 from iejayu8/copilot/fix-no-candle-data-error
+
 ## 1.7.30
 - fix: seed `before_ts` to current time in `get_candles` so `history-candles` always receives a `before` parameter (endpoint silently returns `[]` without it)
 - fix: escape `X-Ingress-Path` header with `html.escape()` before injecting into HTML to prevent XSS
