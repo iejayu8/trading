@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.7.29
+- Merge pull request #47 from iejayu8/copilot/fix-papertrading-position-issues
+
 ## 1.7.28
 - chore: bump version to 1.7.28
 
