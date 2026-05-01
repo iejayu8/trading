@@ -128,7 +128,10 @@ class TestPublicMethods:
 
     def test_get_candles_uses_recent_endpoint_before_history(self, monkeypatch):
         client = _make_client(monkeypatch)
-        recent = [["200", "1", "1", "1", "1", "1", "1"]]
+        recent = [
+            [str(200 - i), "1", "1", "1", "1", "1", "1"]
+            for i in range(100)
+        ]
         older = [["100", "1", "1", "1", "1", "1", "1"]]
         client._session.get = MagicMock(side_effect=[
             _mock_response({"code": "0", "data": recent}),
