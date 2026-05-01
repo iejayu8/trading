@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.7.35
+- fix: add after parameter to history-candles to unblock Collecting candles (100/200)
+
 ## 1.7.34
 - fix: add `after` parameter to all `history-candles` calls in `get_candles`; BloFin silently returns an empty list when only `before` is provided, causing the bot to be permanently stuck at "Collecting candles (100/200)"
 - fix: add `_bar_to_ms` helper to `BloFinClient` so the `after` window scales correctly with the requested bar size
