@@ -128,8 +128,9 @@ class TestPublicMethods:
 
     def test_get_candles_uses_recent_endpoint_before_history(self, monkeypatch):
         client = _make_client(monkeypatch)
+        start_timestamp = 200
         recent = [
-            [str(200 - i), "1", "1", "1", "1", "1", "1"]
+            [str(start_timestamp - i), "1", "1", "1", "1", "1", "1"]
             for i in range(100)
         ]
         older = [["100", "1", "1", "1", "1", "1", "1"]]
