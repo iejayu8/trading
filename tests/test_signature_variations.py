@@ -146,6 +146,19 @@ class TestPublicMethods:
         second_url = client._session.get.call_args_list[1][0][0]
         assert "/api/v1/market/candles" in first_url
         assert "/api/v1/market/history-candles" in second_url
+        # BloFin history-candles requires BOTH before and after to return data.
+        assert "before=" in second_url
+        assert "after=" in second_url
+
+    def test_bar_to_ms(self, monkeypatch):
+        client = _make_client(monkeypatch)
+        assert client._bar_to_ms("1m") == 60_000
+        assert client._bar_to_ms("15m") == 900_000
+        assert client._bar_to_ms("30m") == 1_800_000
+        assert client._bar_to_ms("1H") == 3_600_000
+        assert client._bar_to_ms("4H") == 14_400_000
+        assert client._bar_to_ms("1D") == 86_400_000
+        assert client._bar_to_ms("unknown") == 900_000  # fallback
 
     def test_get_candles_falls_back_to_history_when_recent_is_empty(self, monkeypatch):
         client = _make_client(monkeypatch)
