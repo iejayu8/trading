@@ -1,6 +1,18 @@
 # Changelog
 
-## 1.7.29
+## 1.7.30
+- fix: seed `before_ts` to current time in `get_candles` so `history-candles` always receives a `before` parameter (endpoint silently returns `[]` without it)
+- fix: escape `X-Ingress-Path` header with `html.escape()` before injecting into HTML to prevent XSS
+- fix: hold `_bots_lock` around `_bots.clear()` in mode-switch and copy-trading toggle endpoints (race with concurrent `_get_bot()`)
+- fix: add `denominator <= 0` guard in `calculate_position_size` to prevent division-by-zero when `stop_loss_pct=0`; extract `MIN_POSITION_SIZE = 0.001` constant
+- fix: remove dead `leverage` parameter from `calculate_position_size` (leverage does not affect sizing)
+- fix: portfolio margin cap now uses each trade's own recorded `leverage` from DB instead of `self.leverage` for cross-symbol accuracy
+- fix: breakeven trades (`pnl = 0`) no longer counted as losses in `get_trade_stats` (`pnl <= 0` → `pnl < 0`)
+- fix: close `BloFinClient._session` after each `/api/market/context` call to prevent file-descriptor leaks
+- fix: use `timeout=(5, 10)` on all HTTP calls so TCP connect phase is also bounded
+- fix: replace `get_trade_history(limit=200)` + Python date-filter in daily loss guard with new `get_daily_pnl(date_iso)` date-scoped SQL query — no longer misses trades on high-frequency days
+- backtest: to reproduce last-month 15m backtest run `python backtest/backtest.py --all --fresh --days 30 --equity 1000`
+
 - Merge pull request #47 from iejayu8/copilot/fix-papertrading-position-issues
 
 ## 1.7.28
