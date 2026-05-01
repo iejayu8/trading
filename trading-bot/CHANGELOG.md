@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.7.33
+- Merge pull request #49 from iejayu8/copilot/fix-candle-data-warning
+
 ## 1.7.32
 - fix: use BloFin `market/candles` for the first `get_candles` page, fall back to `history-candles` for older pages, and harden pagination so recent data no longer triggers false `No candle data received` warnings
 
