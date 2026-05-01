@@ -111,6 +111,12 @@ class BloFinClient:
         all_candles: list[list] = []
         remaining = limit
 
+        def _oldest_ts(batch: list[list]) -> int | None:
+            try:
+                return int(batch[-1][0])
+            except (IndexError, TypeError, ValueError):
+                return None
+
         # Fetch the most recent page from the live candles endpoint first.
         first_batch_size = min(remaining, BLOFIN_MAX)
         first_params: dict[str, Any] = {
@@ -127,7 +133,9 @@ class BloFinClient:
                 return all_candles
 
             # The history endpoint returns candles strictly older than ``before``.
-            before_ts = int(first_batch[-1][0])
+            before_ts = _oldest_ts(first_batch)
+            if before_ts is None:
+                return all_candles
         else:
             # Fall back to history pagination if the live endpoint is empty.
             before_ts = int(time.time() * 1000)
@@ -155,7 +163,10 @@ class BloFinClient:
             # Advance cursor: oldest candle in this batch is the last element
             # (BloFin returns newest-first).  Pass its timestamp as the next
             # ``before`` value so the next page starts strictly before it.
-            before_ts = int(batch[-1][0])
+            oldest_ts = _oldest_ts(batch)
+            if oldest_ts is None or oldest_ts >= before_ts:
+                break
+            before_ts = oldest_ts
 
         return all_candles
 
