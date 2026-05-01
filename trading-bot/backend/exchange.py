@@ -97,12 +97,44 @@ class BloFinClient:
         """
         Fetch OHLCV candlestick data.
 
+        BloFin's API allows at most 100 candles per request.  This method
+        automatically paginates using the ``history-candles`` endpoint so
+        callers can request any number of bars without worrying about the
+        per-request cap.  Pages are fetched newest-first and concatenated in
+        the same order, so the returned list is also newest-first (identical
+        to what a single-page call would return).
+
         Returns list of [ts, open, high, low, close, vol, volCcy].
         """
-        path = "/api/v1/market/candles"
-        params = {"instId": symbol, "bar": bar, "limit": limit}
-        resp = self._get(path, params)
-        return resp.get("data", [])
+        BLOFIN_MAX = 100  # confirmed hard limit from BloFin API
+        path = "/api/v1/market/history-candles"
+        all_candles: list[list] = []
+        remaining = limit
+        before_ts: int | None = None
+
+        while remaining > 0:
+            batch_size = min(remaining, BLOFIN_MAX)
+            params: dict[str, Any] = {"instId": symbol, "bar": bar, "limit": batch_size}
+            if before_ts is not None:
+                # Return candles with timestamp strictly older than before_ts
+                params["before"] = str(before_ts)
+
+            batch = self._get(path, params).get("data", [])
+            if not batch:
+                break
+
+            all_candles.extend(batch)
+            remaining -= len(batch)
+
+            if len(batch) < batch_size:
+                break  # fewer candles available than requested; stop paging
+
+            # Advance cursor: oldest candle in this batch is the last element
+            # (BloFin returns newest-first).  Pass its timestamp as the next
+            # ``before`` value so the next page starts strictly before it.
+            before_ts = int(batch[-1][0])
+
+        return all_candles
 
     def get_ticker(self, symbol: str) -> dict:
         path = "/api/v1/market/tickers"

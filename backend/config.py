@@ -140,6 +140,8 @@ SUPPORTED_SYMBOLS: list[str] = [
 #   stop_loss_pct, take_profit_pct   – risk management (always honoured)
 #   adx_min, rsi_pullback_max, rsi_recovery_long,
 #   pullback_lookback, signal_cooldown  – signal params (override module defaults)
+#   rsi_pullback_min, rsi_recovery_short – explicit SHORT RSI thresholds;
+#     when absent, derived as 100 – rsi_pullback_max / 100 – rsi_recovery_long
 #
 # Missing keys fall back to the module-level defaults in strategy.py.
 SYMBOL_PARAMS: dict[str, dict] = {
@@ -147,61 +149,68 @@ SYMBOL_PARAMS: dict[str, dict] = {
     # +20.17% return, WR=48.6%, MaxDD=-7.07%
     # v8: relaxed module-level defaults; per-symbol RSI thresholds widened for
     # bull-market regimes where RSI rarely dips below 52.
+    # v9: LONG thresholds raised further (60→65) because in the May-2026 bull
+    # market RSI oscillated 62-80 and the v8 threshold of ≤60 was never reached
+    # within the 6-bar window, producing zero LONG signals.  Explicit SHORT
+    # thresholds (rsi_pullback_min=40, rsi_recovery_short=37) preserve the
+    # previously-tested SHORT behaviour (mirror of the v8 LONG params: 100-60=40,
+    # 100-63=37) so that raising LONG params does not accidentally loosen SHORT.
     "BTC-USDT": {
-        "stop_loss_pct":    STOP_LOSS_PCT,   # 2.5%
-        "take_profit_pct":  TAKE_PROFIT_PCT,  # 4.0%
-        "rsi_pullback_max": 60.0,  # raised from 52: catches shallow bull-market dips (RSI 60-75)
-        "rsi_recovery_long": 63.0,  # raised from 55: maintains 3-pt gap above new pullback threshold
-        "pullback_lookback": 6,
+        "stop_loss_pct":       STOP_LOSS_PCT,   # 2.5%
+        "take_profit_pct":     TAKE_PROFIT_PCT,  # 4.0%
+        "rsi_pullback_max":    65.0,   # raised 60→65: catches RSI dips in 62-65 bull range
+        "rsi_recovery_long":   68.0,   # raised 63→68: 3-pt gap above new pullback threshold
+        "rsi_pullback_min":    40.0,   # explicit SHORT: preserve v8 value (100-60)
+        "rsi_recovery_short":  37.0,   # explicit SHORT: preserve v8 value (100-63)
+        "pullback_lookback":   6,
     },
     # ETH-USDT: grid-search (365-day 15m data).
     # ETH benefits from tighter SL and wider TP: sharp momentum bursts with
     # cleaner moves than BTC noise.
     # +25.63% return, WR=31.6%, MaxDD=-6.49%
-    # v8: same bull-market RSI widening as BTC.
+    # v9: same LONG-threshold raise as BTC; explicit SHORT thresholds preserved.
     "ETH-USDT": {
-        "stop_loss_pct":    0.015,   # 1.5% — tighter than BTC (ETH moves more cleanly)
-        "take_profit_pct":  0.070,   # 7.0% — wider to capture ETH momentum bursts
-        "rsi_pullback_max": 60.0,  # raised from 52: bull-market dip detection
-        "rsi_recovery_long": 63.0,  # raised from 55: 3-pt gap above pullback threshold
-        "pullback_lookback": 6,
+        "stop_loss_pct":       0.015,   # 1.5% — tighter than BTC (ETH moves more cleanly)
+        "take_profit_pct":     0.070,   # 7.0% — wider to capture ETH momentum bursts
+        "rsi_pullback_max":    65.0,   # raised 60→65: bull-market dip detection
+        "rsi_recovery_long":   68.0,   # raised 63→68: 3-pt gap above pullback threshold
+        "rsi_pullback_min":    40.0,   # explicit SHORT: preserve v8 value (100-60)
+        "rsi_recovery_short":  37.0,   # explicit SHORT: preserve v8 value (100-63)
+        "pullback_lookback":   6,
     },
     # SOL-USDT: grid-search (365-day 15m data).
     # v8: Relaxed from v7 per-symbol params to generate more signals.
-    # RSI pullback raised from 44→50, recovery relaxed from 52→53 (dip ≤50, recover ≥53),
-    # lookback widened from 5→8 bars (2h window), ADX lowered from 22→18.
+    # v9: LONG thresholds raised 50→55/53→58 for bull-market bull RSI regime.
     "SOL-USDT": {
         "stop_loss_pct":    0.015,   # 1.5%
         "take_profit_pct":  0.070,   # 7.0%
         "adx_min":          18.0,    # relaxed from 22: trade in moderately trending SOL
-        "rsi_pullback_max": 50.0,    # relaxed from 44: neutral-zone pullbacks qualify
-        "rsi_recovery_long": 53.0,   # relaxed from 52: confirm recovery (dip ≤50 then recover ≥53)
+        "rsi_pullback_max": 55.0,    # raised 50→55: catches SOL dips in 52-55 range
+        "rsi_recovery_long": 58.0,   # raised 53→58: confirm recovery (dip ≤55 then recover ≥58)
         "pullback_lookback": 8,      # widened from 5: 2-hour detection window
         "signal_cooldown":  24,      # 6-hour cooldown
     },
     # XRP-USDT: grid-search (365-day 15m data).
     # v8: Relaxed from v7 per-symbol params to generate more signals.
-    # RSI pullback raised from 42→50, recovery relaxed from 52→53 (dip ≤50, recover ≥53),
-    # lookback widened from 5→8 bars, ADX lowered from 22→18.
+    # v9: LONG thresholds raised 50→55/53→58 for bull-market RSI regime.
     "XRP-USDT": {
         "stop_loss_pct":    0.015,   # 1.5%
         "take_profit_pct":  0.070,   # 7.0%
         "adx_min":          18.0,    # relaxed from 22
-        "rsi_pullback_max": 50.0,    # relaxed from 42: neutral-zone pullbacks qualify
-        "rsi_recovery_long": 53.0,   # relaxed from 52: confirm recovery (dip ≤50 then recover ≥53)
+        "rsi_pullback_max": 55.0,    # raised 50→55: catches dips in 52-55 range
+        "rsi_recovery_long": 58.0,   # raised 53→58: confirm recovery (dip ≤55 then recover ≥58)
         "pullback_lookback": 8,      # widened from 5: 2-hour detection window
         "signal_cooldown":  24,      # 6-hour cooldown
     },
     # LINK-USDT: wide grid-search (365-day 15m data).
     # v8: Relaxed from v7 per-symbol params to generate more signals.
-    # RSI pullback raised from 42→50, recovery relaxed from 52→53 (dip ≤50, recover ≥53),
-    # lookback widened from 5→8 bars, ADX lowered from 18→14.
+    # v9: LONG thresholds raised 50→55/53→58 for bull-market RSI regime.
     "LINK-USDT": {
         "stop_loss_pct":    0.010,   # 1.0% — tight SL for volatile LINK
         "take_profit_pct":  0.055,   # 5.5%
         "adx_min":          14.0,    # relaxed from 18: LINK trends at lower ADX
-        "rsi_pullback_max": 50.0,    # relaxed from 42: neutral-zone pullbacks qualify
-        "rsi_recovery_long": 53.0,   # relaxed from 52: confirm recovery (dip ≤50 then recover ≥53)
+        "rsi_pullback_max": 55.0,    # raised 50→55: catches dips in 52-55 range
+        "rsi_recovery_long": 58.0,   # raised 53→58: confirm recovery (dip ≤55 then recover ≥58)
         "pullback_lookback": 8,      # widened from 5: 2-hour detection window
         "signal_cooldown":  24,      # 6-hour cooldown
     },
