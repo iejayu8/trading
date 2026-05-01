@@ -180,7 +180,7 @@ SYMBOL_PARAMS: dict[str, dict] = {
     },
     # SOL-USDT: grid-search (365-day 15m data).
     # v8: Relaxed from v7 per-symbol params to generate more signals.
-    # v9: LONG thresholds raised 50→55/53→58 for bull-market bull RSI regime.
+    # v9: LONG thresholds raised 50→55/53→58 for bull-market RSI regime.
     "SOL-USDT": {
         "stop_loss_pct":    0.015,   # 1.5%
         "take_profit_pct":  0.070,   # 7.0%
