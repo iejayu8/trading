@@ -97,23 +97,40 @@ class BloFinClient:
         """
         Fetch OHLCV candlestick data.
 
-        BloFin's API allows at most 100 candles per request.  This method
-        automatically paginates using the ``history-candles`` endpoint so
-        callers can request any number of bars without worrying about the
-        per-request cap.  Pages are fetched newest-first and concatenated in
-        the same order, so the returned list is also newest-first (identical
-        to what a single-page call would return).
+        BloFin's API allows at most 100 candles per request. This method first
+        reads the freshest page from the regular ``candles`` endpoint, then
+        paginates older data via ``history-candles`` when the caller requests
+        more than 100 bars. This avoids false empty responses from
+        ``history-candles`` while still honoring the 100-candle cap.
 
         Returns list of [ts, open, high, low, close, vol, volCcy].
         """
         BLOFIN_MAX = 100  # confirmed hard limit from BloFin API
-        path = "/api/v1/market/history-candles"
+        live_path = "/api/v1/market/candles"
+        history_path = "/api/v1/market/history-candles"
         all_candles: list[list] = []
         remaining = limit
-        # Seed with current time so the first request always includes the
-        # ``before`` parameter – the history-candles endpoint returns an empty
-        # response when ``before`` is omitted.
-        before_ts: int = int(time.time() * 1000)
+
+        # Fetch the most recent page from the live candles endpoint first.
+        first_batch_size = min(remaining, BLOFIN_MAX)
+        first_params: dict[str, Any] = {
+            "instId": symbol,
+            "bar": bar,
+            "limit": first_batch_size,
+        }
+        first_batch = self._get(live_path, first_params).get("data", [])
+        if first_batch:
+            all_candles.extend(first_batch)
+            remaining -= len(first_batch)
+
+            if remaining <= 0 or len(first_batch) < first_batch_size:
+                return all_candles
+
+            # The history endpoint returns candles strictly older than ``before``.
+            before_ts = int(first_batch[-1][0])
+        else:
+            # Fall back to history pagination if the live endpoint is empty.
+            before_ts = int(time.time() * 1000)
 
         while remaining > 0:
             batch_size = min(remaining, BLOFIN_MAX)
@@ -125,7 +142,7 @@ class BloFinClient:
                 "before": str(before_ts),
             }
 
-            batch = self._get(path, params).get("data", [])
+            batch = self._get(history_path, params).get("data", [])
             if not batch:
                 break
 
