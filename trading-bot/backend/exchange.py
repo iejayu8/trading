@@ -27,6 +27,32 @@ except ImportError:
     config = importlib.import_module("config")
 
 
+# ── Bar-duration helper ───────────────────────────────────────────────────────
+
+_BAR_MS: dict[str, int] = {
+    "1m":  60_000,
+    "3m":  180_000,
+    "5m":  300_000,
+    "15m": 900_000,
+    "30m": 1_800_000,
+    "1h":  3_600_000,
+    "2h":  7_200_000,
+    "4h":  14_400_000,
+    "6h":  21_600_000,
+    "12h": 43_200_000,
+    "1d":  86_400_000,
+    "1w":  604_800_000,
+}
+
+
+def _bar_to_ms(bar: str) -> int:
+    """Return the duration of one candlestick bar in milliseconds.
+
+    Falls back to 900 000 ms (15 minutes) for unrecognised bar strings.
+    """
+    return _BAR_MS.get(bar, 900_000)
+
+
 class BloFinClient:
     """Thin wrapper around the BloFin REST API."""
 
@@ -91,18 +117,63 @@ class BloFinClient:
 
     # ── Market data (public) ──────────────────────────────────────────────────
 
+    #: BloFin hard-caps every candle endpoint at 100 rows per request.
+    CANDLE_BATCH: int = 100
+
     def get_candles(
         self, symbol: str, bar: str = "15m", limit: int = 200
     ) -> list[list]:
-        """
-        Fetch OHLCV candlestick data.
+        """Fetch OHLCV candlestick data, paginating as needed.
 
-        Returns list of [ts, open, high, low, close, vol, volCcy].
+        BloFin hard-caps ``/api/v1/market/candles`` at 100 rows per request.
+        When *limit* > 100 this method fetches multiple pages via
+        ``/api/v1/market/history-candles`` (which accepts ``before``/``after``
+        cursor parameters) and stitches them together.
+
+        Returns candles in **newest-first** order (same as the raw BloFin
+        response) so the existing ``_candles_to_df`` helper can reverse them
+        without changes.
         """
-        path = "/api/v1/market/candles"
-        params = {"instId": symbol, "bar": bar, "limit": limit}
-        resp = self._get(path, params)
-        return resp.get("data", [])
+        bar_ms = _bar_to_ms(bar)
+        batch = self.CANDLE_BATCH
+        all_candles: list[list] = []
+
+        # ``before`` is an exclusive upper-bound timestamp in milliseconds.
+        # Add one bar so the most recently closed candle is always included.
+        before_ms = int(time.time() * 1000) + bar_ms
+
+        while len(all_candles) < limit:
+            fetch_n = min(limit - len(all_candles), batch)
+            # ``after`` (inclusive lower bound) must always be provided –
+            # BloFin returns an empty list when it is omitted.  Use a window
+            # that is 2× the batch size wide to guarantee *fetch_n* results.
+            after_ms = before_ms - fetch_n * bar_ms * 2
+
+            params = {
+                "instId": symbol,
+                "bar": bar,
+                "limit": fetch_n,
+                "before": str(before_ms),
+                "after": str(after_ms),
+            }
+            resp = self._get("/api/v1/market/history-candles", params)
+            page: list[list] = resp.get("data", [])
+
+            if not page:
+                break
+
+            all_candles.extend(page)
+
+            # Advance the cursor to before the oldest candle just received.
+            oldest_ts = int(page[-1][0])
+            if oldest_ts >= before_ms:
+                break  # no forward progress – safety guard
+            before_ms = oldest_ts
+
+            if len(page) < fetch_n:
+                break  # API has no more history
+
+        return all_candles[:limit]
 
     def get_ticker(self, symbol: str) -> dict:
         path = "/api/v1/market/tickers"

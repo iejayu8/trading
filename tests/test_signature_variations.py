@@ -15,7 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 
 import config
-from exchange import BloFinClient
+from exchange import BloFinClient, _bar_to_ms
 
 
 def _make_client(monkeypatch, secret: str = "test_secret") -> BloFinClient:
@@ -125,6 +125,54 @@ class TestPublicMethods:
         client._session.get = MagicMock(return_value=mock_resp)
         result = client.get_candles("BTC-USDT")
         assert result == []
+
+    def test_get_candles_paginates_to_reach_limit(self, monkeypatch):
+        """get_candles must paginate when limit > CANDLE_BATCH (100)."""
+        client = _make_client(monkeypatch)
+
+        bar_ms = 900_000  # 15m in ms
+        # Build two pages of 100 candles each (newest-first within each page).
+        # Page 1: timestamps 200 .. 101 (most recent)
+        page1 = [
+            [str(1_700_000_000_000 + i * bar_ms), "50000", "51000", "49000", "50500", "10", "0"]
+            for i in range(200, 100, -1)
+        ]
+        # Page 2: timestamps 100 .. 1 (older)
+        page2 = [
+            [str(1_700_000_000_000 + i * bar_ms), "50000", "51000", "49000", "50500", "10", "0"]
+            for i in range(100, 0, -1)
+        ]
+
+        call_count = {"n": 0}
+
+        def mock_get_side_effect(url, **kwargs):
+            call_count["n"] += 1
+            page = page1 if call_count["n"] == 1 else page2
+            return _mock_response({"code": "0", "data": page})
+
+        client._session.get = MagicMock(side_effect=mock_get_side_effect)
+        result = client.get_candles("BTC-USDT", "15m", 200)
+
+        assert len(result) == 200
+        assert call_count["n"] == 2  # two HTTP pages were fetched
+
+    def test_get_candles_uses_history_endpoint(self, monkeypatch):
+        """get_candles must call the history-candles endpoint."""
+        client = _make_client(monkeypatch)
+        candles = [["1700000000000", "50000", "51000", "49000", "50500", "10", "0"]]
+        mock_resp = _mock_response({"code": "0", "data": candles})
+        client._session.get = MagicMock(return_value=mock_resp)
+        client.get_candles("BTC-USDT", "15m", 100)
+        url_called = client._session.get.call_args[0][0]
+        assert "history-candles" in url_called
+
+    def test_bar_to_ms_known_bars(self):
+        assert _bar_to_ms("15m") == 900_000
+        assert _bar_to_ms("1h") == 3_600_000
+        assert _bar_to_ms("1d") == 86_400_000
+
+    def test_bar_to_ms_unknown_falls_back_to_15m(self):
+        assert _bar_to_ms("99x") == 900_000
 
     def test_get_ticker_returns_first_entry(self, monkeypatch):
         client = _make_client(monkeypatch)

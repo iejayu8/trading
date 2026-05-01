@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.7.25
+- fix: `get_candles` now paginates via `/api/v1/market/history-candles` — BloFin hard-caps the standard candles endpoint at 100 rows so requesting `limit=200` only returned 100, leaving the bot permanently stuck at "Collecting candles (100/200)". The new implementation fetches multiple 100-row pages until the requested count is satisfied, using `before`/`after` cursor parameters as required by the history endpoint.
+
 ## 1.7.24
 - Initial plan
 - fix: update tests, copy-trading fallback, backtest equity conservation, bump version to 1.7.23
