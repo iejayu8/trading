@@ -122,9 +122,42 @@ class TestPublicMethods:
     def test_get_candles_empty_on_no_data(self, monkeypatch):
         client = _make_client(monkeypatch)
         mock_resp = _mock_response({"code": "0"})
-        client._session.get = MagicMock(return_value=mock_resp)
+        client._session.get = MagicMock(side_effect=[mock_resp, mock_resp])
         result = client.get_candles("BTC-USDT")
         assert result == []
+
+    def test_get_candles_uses_recent_endpoint_before_history(self, monkeypatch):
+        client = _make_client(monkeypatch)
+        start_timestamp = 200
+        recent = [
+            [str(start_timestamp - i), "1", "1", "1", "1", "1", "1"]
+            for i in range(100)
+        ]
+        older = [["100", "1", "1", "1", "1", "1", "1"]]
+        client._session.get = MagicMock(side_effect=[
+            _mock_response({"code": "0", "data": recent}),
+            _mock_response({"code": "0", "data": older}),
+        ])
+
+        result = client.get_candles("BTC-USDT", "15m", 150)
+
+        assert result == recent + older
+        first_url = client._session.get.call_args_list[0][0][0]
+        second_url = client._session.get.call_args_list[1][0][0]
+        assert "/api/v1/market/candles" in first_url
+        assert "/api/v1/market/history-candles" in second_url
+
+    def test_get_candles_falls_back_to_history_when_recent_is_empty(self, monkeypatch):
+        client = _make_client(monkeypatch)
+        history = [["1700000000000", "50000", "51000", "49000", "50500", "10", "500000"]]
+        client._session.get = MagicMock(side_effect=[
+            _mock_response({"code": "0", "data": []}),
+            _mock_response({"code": "0", "data": history}),
+        ])
+
+        result = client.get_candles("BTC-USDT", "15m", 100)
+
+        assert result == history
 
     def test_get_ticker_returns_first_entry(self, monkeypatch):
         client = _make_client(monkeypatch)
@@ -163,4 +196,3 @@ class TestPublicMethods:
         client._session.get = MagicMock(return_value=mock_resp)
         result = client.get_positions("BTC-USDT")
         assert result == []
-
