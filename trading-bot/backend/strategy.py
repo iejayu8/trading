@@ -6,14 +6,14 @@ Instruments: BTC-USDT, ETH-USDT, SOL-USDT, XRP-USDT, LINK-USDT
              (all symbols use the same strategy logic with per-symbol
               parameter overrides stored in config.SYMBOL_PARAMS)
 
-Strategy: Pullback-to-EMA with RSI Recovery (v8)
+Strategy: Pullback-to-EMA with RSI Recovery (v9)
 ─────────────────────────────────────────────────
 Identifies short-term pullbacks within established trends and enters
 when momentum recovers, gated by ADX trend-strength to avoid the most
 extreme ranging markets.
 
-Root-cause analysis (v5 → v6 → v7 → v8)
-─────────────────────────────────────────
+Root-cause analysis (v5 → v6 → v7 → v8 → v9)
+──────────────────────────────────────────────
 v5 → v6 (ADX gate + lookback tightening):
 • 64 % of SL trades occurred in sub-ADX-22 environments.
 • Pullback lookback of 8 bars (2 h) was too wide: stale setups.
@@ -41,6 +41,20 @@ v7 → v8 (live production tuning – April 2026):
 • Widening PULLBACK_LOOKBACK from 3 → 6 bars (90 min): gives the strategy a
   wider window to catch the pullback, reducing sensitivity to exact timing.
 
+v8 → v9 (bull-market tuning – May 2026):
+• Two confirmed root causes of zero openings in paper trading were identified:
+  1. BloFin API hard-cap of 100 candles per request:  the bot was fetching
+     limit=200 but receiving only 100, so len(df)=100 < MIN_BARS_REQUIRED=200
+     permanently blocked all signal generation.  Fixed in exchange.py by
+     paginating via the history-candles endpoint (same pattern used in the
+     backtest data loader, where the 100-candle cap was already documented).
+  2. RSI pullback thresholds too low for bull-market RSI regimes: in a strong
+     uptrend BTC/ETH RSI oscillates in the 62–80 range and never dips to the
+     v8 threshold of ≤60 within a 6-bar window, so "Recent RSI pullback"
+     never passes.  Module defaults raised to 55/58; per-symbol overrides for
+     BTC/ETH raised to 65/68 (LONG only — explicit SHORT thresholds preserved
+     to avoid unintended loosening of SHORT entries in downtrends).
+
 Backtest result (365 days BTC/USDT 15m, grid search over 2 916 combinations)
 ──────────────────────────────────────────────────────────────────────────────
   v6 (ADX≥22, LB=4, SL=2.0%, TP=4.5%):  -13.22%, WR=28.9%, DD=-15.94%  ← 2025-26 data
@@ -51,13 +65,15 @@ Entry conditions (LONG)
 1. ADX ≥ 16      : market is trending (not extreme chop / ranging)
 2. Macro trend   : close > 200 EMA
 3. Medium trend  : slow EMA (21) > trend EMA (55)
-4. Fresh pullback: RSI dropped below 52 within the last 6 bars
-5. Recovery      : current RSI ≥ 55 (momentum returning above neutral)
+4. Fresh pullback: RSI dropped below 55 within the last 6 bars
+5. Recovery      : current RSI ≥ 58 (momentum returning above neutral)
 6. Price above   : close > fast EMA (9) — price reclaimed the fast EMA
 7. MACD hist     : current bar ≥ −0.5 × ATR  (not in strong downtrend)
 8. Volume        : current bar ≥ 0.9× 20-period SMA
 
-Entry conditions (SHORT) are the mirror image.
+Entry conditions (SHORT) are the mirror image of the LONG conditions unless
+per-symbol overrides supply explicit ``rsi_pullback_min`` / ``rsi_recovery_short``
+values (BTC/ETH do this to preserve tested SHORT thresholds).
 
 Cooldown: 24-bar minimum (6 h) between entries.
 
@@ -97,26 +113,29 @@ ADX_MIN = 16.0
 # multiple days.  16 still filters extreme ranging environments (ADX < 15)
 # while allowing moderately directional markets to participate.
 
-RSI_PULLBACK_MAX = 52.0
-# RSI must dip to ≤ 52 within PULLBACK_LOOKBACK bars for LONG entries.
-# Raised from 46 (v8): the 46-threshold required deep oversold dips that
-# rarely occur in modern trending crypto.  52 catches neutral-zone pullbacks
-# (RSI briefly touches ≤ 52 during healthy uptrend consolidations), generating
-# more entries without requiring extreme bearish momentum.
+RSI_PULLBACK_MAX = 55.0
+# RSI must dip to ≤ 55 within PULLBACK_LOOKBACK bars for LONG entries.
+# Raised from 52 (v9): in bull markets where RSI oscillates in the 62-80
+# range, the v8 threshold of ≤52 was never reached within the 6-bar window,
+# producing zero LONG signals.  55 catches shallower consolidations (RSI
+# briefly touches the 52-55 band in healthy uptrend pauses).
+# Per-symbol overrides in config.SYMBOL_PARAMS take precedence.
 
-RSI_PULLBACK_MIN = 48.0
-# Mirror threshold for SHORT entries: RSI must spike to ≥ 48 during pullback.
-# Mirrors RSI_PULLBACK_MAX (100 - 52 = 48).
+RSI_PULLBACK_MIN = 45.0
+# Mirror threshold for SHORT entries: RSI must spike to ≥ 45 during pullback.
+# Mirrors RSI_PULLBACK_MAX (100 - 55 = 45).
+# Symbols may override this directly via ``rsi_pullback_min`` in SYMBOL_PARAMS.
 
-RSI_RECOVERY_LONG = 55.0
-# RSI must recover above 55 before entering LONG, confirming momentum return.
-# Raised from 49 (v8): maintains a 3-point spread above the new pullback
-# threshold (dip ≤ 52, recover ≥ 55), ensuring genuine bullish momentum
-# before entry rather than triggering on a flat/sideways RSI reading.
+RSI_RECOVERY_LONG = 58.0
+# RSI must recover above 58 before entering LONG, confirming momentum return.
+# Raised from 55 (v9): maintains a 3-point spread above the new pullback
+# threshold (dip ≤ 55, recover ≥ 58).
+# Per-symbol overrides in config.SYMBOL_PARAMS take precedence.
 
-RSI_RECOVERY_SHORT = 45.0
-# RSI must fall back below 45 before entering SHORT.
-# Mirrors RSI_RECOVERY_LONG (100 - 55 = 45).
+RSI_RECOVERY_SHORT = 42.0
+# RSI must fall back below 42 before entering SHORT.
+# Mirrors RSI_RECOVERY_LONG (100 - 58 = 42).
+# Symbols may override this directly via ``rsi_recovery_short`` in SYMBOL_PARAMS.
 
 PULLBACK_LOOKBACK = 6
 # Number of bars to look back for the RSI dip/spike (90 min on 15-min chart).
@@ -352,8 +371,10 @@ def get_signal_checks(df: pd.DataFrame, sym_params: dict | None = None) -> dict:
     """Return per-side checks and current indicator values used for entry decisions.
 
     *sym_params* may contain per-symbol overrides for strategy thresholds
-    (adx_min, rsi_pullback_max, rsi_recovery_long, pullback_lookback).
-    Falls back to module-level defaults when keys are absent.
+    (adx_min, rsi_pullback_max, rsi_recovery_long, pullback_lookback,
+    rsi_pullback_min, rsi_recovery_short).  Falls back to module-level
+    defaults when keys are absent; SHORT RSI thresholds fall back to the
+    mirror of the LONG thresholds when no explicit override is provided.
     """
     if df.empty:
         return {
@@ -367,10 +388,14 @@ def get_signal_checks(df: pd.DataFrame, sym_params: dict | None = None) -> dict:
 
     adx_min           = sym_params.get("adx_min",           ADX_MIN)
     rsi_pullback_max  = sym_params.get("rsi_pullback_max",  RSI_PULLBACK_MAX)
-    rsi_pullback_min  = 100.0 - rsi_pullback_max
     rsi_recovery_long = sym_params.get("rsi_recovery_long", RSI_RECOVERY_LONG)
-    rsi_recovery_short = 100.0 - rsi_recovery_long
     pullback_lookback  = sym_params.get("pullback_lookback", PULLBACK_LOOKBACK)
+
+    # SHORT thresholds: use explicit sym_params when provided so LONG and SHORT
+    # can be tuned independently.  Fall back to the symmetric mirror of the LONG
+    # thresholds when no explicit values are given.
+    rsi_pullback_min   = sym_params.get("rsi_pullback_min",   100.0 - rsi_pullback_max)
+    rsi_recovery_short = sym_params.get("rsi_recovery_short", 100.0 - rsi_recovery_long)
 
     last = df.iloc[-1]
     rsi_window = df["rsi"].iloc[-(pullback_lookback + 1):-1]

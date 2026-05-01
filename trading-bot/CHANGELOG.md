@@ -1,6 +1,15 @@
 # Changelog
 
-## 1.7.26
+## 1.7.28
+- chore: bump version to 1.7.28
+
+## 1.7.27
+- fix: **positions never opened in paper trading** — two confirmed root causes resolved:
+  1. **BloFin API hard-cap of 100 candles per request**: the bot was requesting `limit=200` but receiving only 100 candles, so `len(df)=100 < MIN_BARS_REQUIRED=200` permanently blocked all signal generation (`generate_signal` always returned `NONE`). Fixed by switching `get_candles` to the `history-candles` endpoint with cursor-based pagination (same pattern already used in `backtest/fetch_data.py` where the 100-candle limit was explicitly documented).
+  2. **RSI pullback thresholds too low for bull-market conditions**: in a strong uptrend BTC/ETH RSI oscillates in the 62–80 range; the v8 pullback threshold of ≤ 60 was never reached within the 6-bar window, so "Recent RSI pullback" never passed and all LONG signals were blocked. Per-symbol thresholds raised: BTC/ETH `rsi_pullback_max` 60 → 65, `rsi_recovery_long` 63 → 68; SOL/XRP/LINK 50 → 55 / 53 → 58. Module-level defaults raised from 52/55 to 55/58. Explicit SHORT thresholds (`rsi_pullback_min`, `rsi_recovery_short`) added to BTC/ETH params to preserve tested SHORT behaviour (mirrors of the v8 values) so raising LONG params does not accidentally loosen SHORT entries.
+- refactor: `get_signal_checks` now resolves `rsi_pullback_min` and `rsi_recovery_short` from `sym_params` first (explicit override), then falls back to the symmetric mirror formula — enables independent LONG/SHORT RSI tuning per symbol without changing the strategy logic for symbols that don't need it.
+
+
 - fix: document live optimizer baseline
 - fix: polish changelog and optimizer naming
 - fix: address validation feedback
