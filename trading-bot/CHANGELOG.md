@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.7.28
+- chore: bump version to 1.7.28
+
 ## 1.7.27
 - fix: **positions never opened in paper trading** — two confirmed root causes resolved:
   1. **BloFin API hard-cap of 100 candles per request**: the bot was requesting `limit=200` but receiving only 100 candles, so `len(df)=100 < MIN_BARS_REQUIRED=200` permanently blocked all signal generation (`generate_signal` always returned `NONE`). Fixed by switching `get_candles` to the `history-candles` endpoint with cursor-based pagination (same pattern already used in `backtest/fetch_data.py` where the 100-candle limit was explicitly documented).
