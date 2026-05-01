@@ -91,6 +91,26 @@ class BloFinClient:
 
     # ── Market data (public) ──────────────────────────────────────────────────
 
+    # Map bar-string suffixes to milliseconds so ``get_candles`` can compute
+    # the ``after`` lower-bound required by the BloFin history-candles endpoint.
+    _BAR_SUFFIX_MS: dict[str, int] = {
+        "m": 60_000,
+        "H": 3_600_000,
+        "D": 86_400_000,
+        "W": 604_800_000,
+    }
+
+    @staticmethod
+    def _bar_to_ms(bar: str) -> int:
+        """Convert a BloFin bar string (e.g. ``"15m"``, ``"4H"``) to milliseconds."""
+        for suffix, ms in BloFinClient._BAR_SUFFIX_MS.items():
+            if bar.endswith(suffix):
+                try:
+                    return int(bar[:-1]) * ms
+                except ValueError:
+                    pass
+        return 900_000  # safe default: 15m
+
     def get_candles(
         self, symbol: str, bar: str = "15m", limit: int = 200
     ) -> list[list]:
@@ -103,6 +123,12 @@ class BloFinClient:
         more than 100 bars. This avoids false empty responses from
         ``history-candles`` while still honoring the 100-candle cap.
 
+        The ``history-candles`` endpoint requires **both** ``before`` and
+        ``after`` query parameters – omitting ``after`` causes BloFin to return
+        an empty result set even when data exists.  ``after`` is computed as
+        ``before_ts - (batch_size × bar_ms × 2)`` to give a 2× safety window
+        that accommodates minor gaps in market data.
+
         Returns list of [ts, open, high, low, close, vol, volCcy].
         """
         BLOFIN_MAX = 100  # confirmed hard limit from BloFin API
@@ -110,6 +136,7 @@ class BloFinClient:
         history_path = "/api/v1/market/history-candles"
         all_candles: list[list] = []
         remaining = limit
+        bar_ms = self._bar_to_ms(bar)
 
         def _oldest_ts(batch: list[list]) -> int | None:
             try:
@@ -142,12 +169,18 @@ class BloFinClient:
 
         while remaining > 0:
             batch_size = min(remaining, BLOFIN_MAX)
+            # BloFin history-candles requires BOTH ``before`` and ``after`` to
+            # return results.  Without ``after`` the endpoint returns an empty
+            # list even when historical data is available.  Use a 2× safety
+            # window so minor data gaps do not cause the page to come up short.
+            after_ts = before_ts - (batch_size * bar_ms * 2)
             params: dict[str, Any] = {
                 "instId": symbol,
                 "bar": bar,
                 "limit": batch_size,
                 # Return candles with timestamp strictly older than before_ts
                 "before": str(before_ts),
+                "after": str(after_ts),
             }
 
             batch = self._get(history_path, params).get("data", [])
