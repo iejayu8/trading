@@ -76,7 +76,7 @@ class BloFinClient:
         url = self.BASE_URL + signed_path
         nonce = str(uuid4())
         headers = self._headers("GET", signed_path, nonce)
-        resp = self._session.get(url, headers=headers, timeout=10)
+        resp = self._session.get(url, headers=headers, timeout=(5, 10))
         resp.raise_for_status()
         return resp.json()
 
@@ -85,7 +85,7 @@ class BloFinClient:
         nonce = str(uuid4())
         headers = self._headers("POST", path, nonce, body)
         url = self.BASE_URL + path
-        resp = self._session.post(url, headers=headers, data=body, timeout=10)
+        resp = self._session.post(url, headers=headers, data=body, timeout=(5, 10))
         resp.raise_for_status()
         return resp.json()
 
