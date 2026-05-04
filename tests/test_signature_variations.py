@@ -185,22 +185,21 @@ class TestPublicMethods:
             [str(1_700_000_000_000 + i * bar_ms), "1", "1", "1", "1", "1", "1"]
             for i in range(200, 100, -1)
         ]
-        calls = []
+        call_urls = []
 
         def side_effect(url, **kwargs):
-            calls.append(kwargs.get("params", {}))
-            if len(calls) == 1:
+            call_urls.append(url)
+            if len(call_urls) == 1:
                 return _mock_response({"code": "0", "data": recent})
             return _mock_response({"code": "0", "data": older})
 
         client._session.get = MagicMock(side_effect=side_effect)
         client.get_candles("BTC-USDT", "15m", limit)
 
-        # First call is to live candles (no after param).
-        # Second call is to history-candles and must carry a fixed 'after'.
-        assert len(calls) == 2
-        # The fixed 'after' must be present on the history call.
-        assert "after" in calls[1], "history-candles call must include 'after' parameter"
+        assert len(call_urls) == 2
+        history_url = call_urls[1]
+        assert "history-candles" in history_url
+        assert "after=" in history_url, "history-candles call must include fixed 'after' parameter"
 
     def test_get_candles_raises_on_api_error_code(self, monkeypatch):
         """get_candles must raise RuntimeError on a non-zero BloFin error code."""
