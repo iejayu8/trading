@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.38
+- fix: `get_candles` now uses a **fixed** `after` lower-bound (same approach as `backtest/fetch_data.py`) instead of a rolling `after_ts = before_ts - batch×bar_ms×2`. The rolling window narrowed as the cursor advanced, causing BloFin to silently return an empty second page, leaving all symbols permanently stuck at "Collecting candles (100/200)".
+- fix: `get_candles` raises `RuntimeError` on any non-`"0"` BloFin error code (e.g. rate-limit `50011`) so `_call_with_retries` retries the full fetch instead of silently accepting a partial result.
+- fix: `get_candles` uses `resp.get("data") or []` to correctly handle `data=null` JSON responses.
+
 ## 1.7.37
 - fix: apply after parameter fix to trading-bot/backend/exchange.py to unblock Collecting candles (100/200)
 - Initial plan
