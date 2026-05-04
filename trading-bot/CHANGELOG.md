@@ -1,17 +1,66 @@
 # Changelog
 
-## 1.7.26
-- fix: `get_candles` pagination now uses a **fixed** `after` lower-bound (mirrors the proven pattern in `backtest/fetch_data.py`) instead of a rolling window. Previously the rolling `after_ms = before_ms - 200×bar_ms` could cause BloFin to return an empty second page in certain API states, leaving the bot stuck at "Collecting candles (100/200)".
-- fix: `get_candles` now checks the API response `code` field and raises `RuntimeError` on any non-`"0"` code (e.g. rate-limit `50011`). This ensures `_call_with_retries` retries the full fetch instead of silently accepting a partial 100-candle result.
-- fix: `get_candles` treats `data=null` in the API response the same as `data=[]`, preventing a `TypeError` if BloFin returns a null data field.
+## 1.7.38
+- fix: `get_candles` now uses a **fixed** `after` lower-bound (same approach as `backtest/fetch_data.py`) instead of a rolling `after_ts = before_ts - batch×bar_ms×2`. The rolling window narrowed as the cursor advanced, causing BloFin to silently return an empty second page, leaving all symbols permanently stuck at "Collecting candles (100/200)".
+- fix: `get_candles` raises `RuntimeError` on any non-`"0"` BloFin error code (e.g. rate-limit `50011`) so `_call_with_retries` retries the full fetch instead of silently accepting a partial result.
+- fix: `get_candles` uses `resp.get("data") or []` to correctly handle `data=null` JSON responses.
+
+## 1.7.37
+- fix: apply after parameter fix to trading-bot/backend/exchange.py to unblock Collecting candles (100/200)
+- Initial plan
+
+## 1.7.36
+- fix: actually apply `_bar_to_ms` helper and `after` parameter to `history-candles` in `trading-bot/backend/exchange.py`; previous fixes (1.7.34, 1.7.35) only updated the root `backend/exchange.py` copy, leaving the deployed bot still stuck at "Collecting candles (100/200)"
+
+## 1.7.35
+- fix: add after parameter to history-candles to unblock Collecting candles (100/200)
+
+## 1.7.34
+- fix: add `after` parameter to all `history-candles` calls in `get_candles`; BloFin silently returns an empty list when only `before` is provided, causing the bot to be permanently stuck at "Collecting candles (100/200)"
+- fix: add `_bar_to_ms` helper to `BloFinClient` so the `after` window scales correctly with the requested bar size
+
+## 1.7.33
+- Merge pull request #49 from iejayu8/copilot/fix-candle-data-warning
+
+## 1.7.32
+- fix: use BloFin `market/candles` for the first `get_candles` page, fall back to `history-candles` for older pages, and harden pagination so recent data no longer triggers false `No candle data received` warnings
+
+## 1.7.31
+- Merge pull request #48 from iejayu8/copilot/fix-no-candle-data-error
+
+## 1.7.30
+- fix: seed `before_ts` to current time in `get_candles` so `history-candles` always receives a `before` parameter (endpoint silently returns `[]` without it)
+- fix: escape `X-Ingress-Path` header with `html.escape()` before injecting into HTML to prevent XSS
+- fix: hold `_bots_lock` around `_bots.clear()` in mode-switch and copy-trading toggle endpoints (race with concurrent `_get_bot()`)
+- fix: add `denominator <= 0` guard in `calculate_position_size` to prevent division-by-zero when `stop_loss_pct=0`; extract `MIN_POSITION_SIZE = 0.001` constant
+- fix: remove dead `leverage` parameter from `calculate_position_size` (leverage does not affect sizing)
+- fix: portfolio margin cap now uses each trade's own recorded `leverage` from DB instead of `self.leverage` for cross-symbol accuracy
+- fix: breakeven trades (`pnl = 0`) no longer counted as losses in `get_trade_stats` (`pnl <= 0` → `pnl < 0`)
+- fix: close `BloFinClient._session` after each `/api/market/context` call to prevent file-descriptor leaks
+- fix: use `timeout=(5, 10)` on all HTTP calls so TCP connect phase is also bounded
+- fix: replace `get_trade_history(limit=200)` + Python date-filter in daily loss guard with new `get_daily_pnl(date_iso)` date-scoped SQL query — no longer misses trades on high-frequency days
+- backtest: to reproduce last-month 15m backtest run `python backtest/backtest.py --all --fresh --days 30 --equity 1000`
+
+- Merge pull request #47 from iejayu8/copilot/fix-papertrading-position-issues
+
+## 1.7.28
+- chore: bump version to 1.7.28
+
+## 1.7.27
+- fix: **positions never opened in paper trading** — two confirmed root causes resolved:
+  1. **BloFin API hard-cap of 100 candles per request**: the bot was requesting `limit=200` but receiving only 100 candles, so `len(df)=100 < MIN_BARS_REQUIRED=200` permanently blocked all signal generation (`generate_signal` always returned `NONE`). Fixed by switching `get_candles` to the `history-candles` endpoint with cursor-based pagination (same pattern already used in `backtest/fetch_data.py` where the 100-candle limit was explicitly documented).
+  2. **RSI pullback thresholds too low for bull-market conditions**: in a strong uptrend BTC/ETH RSI oscillates in the 62–80 range; the v8 pullback threshold of ≤ 60 was never reached within the 6-bar window, so "Recent RSI pullback" never passed and all LONG signals were blocked. Per-symbol thresholds raised: BTC/ETH `rsi_pullback_max` 60 → 65, `rsi_recovery_long` 63 → 68; SOL/XRP/LINK 50 → 55 / 53 → 58. Module-level defaults raised from 52/55 to 55/58. Explicit SHORT thresholds (`rsi_pullback_min`, `rsi_recovery_short`) added to BTC/ETH params to preserve tested SHORT behaviour (mirrors of the v8 values) so raising LONG params does not accidentally loosen SHORT entries.
+- refactor: `get_signal_checks` now resolves `rsi_pullback_min` and `rsi_recovery_short` from `sym_params` first (explicit override), then falls back to the symmetric mirror formula — enables independent LONG/SHORT RSI tuning per symbol without changing the strategy logic for symbols that don't need it.
+
+
+- fix: document live optimizer baseline
+- fix: polish changelog and optimizer naming
+- fix: address validation feedback
 
 ## 1.7.25
-- fix: `get_candles` now paginates via `/api/v1/market/history-candles` — BloFin hard-caps the standard candles endpoint at 100 rows so requesting `limit=200` only returned 100, leaving the bot permanently stuck at "Collecting candles (100/200)". The new implementation fetches multiple 100-row pages until the requested count is satisfied, using `before`/`after` cursor parameters as required by the history endpoint.
-
-## 1.7.24
-- Initial plan
-- fix: update tests, copy-trading fallback, backtest equity conservation, bump version to 1.7.23
-- Initial plan
+- fix: preserve the last known copy-trading state in `start()`, `_tick()`, `_tick_copy_only()`, and `_run_loop()` when reading DB config fails — transient DB errors no longer disable mirroring or bypass the intended entry path
+- fix: align frontend/default trading-mode fallbacks with `papertrading` so the dashboard no longer boots showing the stale real-trading state that previously blocked entries without credentials
+- fix: align `backtest/optimize.py` with the live strategy by using ATR-normalised MACD gates, shared volume thresholds, and v8-era search ranges/baselines
 
 ## 1.7.23
 - fix: update `test_trading_mode_invalid_resets_leverage` to expect `"papertrading"` fallback (was `"realtrading"`)

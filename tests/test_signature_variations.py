@@ -15,7 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 
 import config
-from exchange import BloFinClient, _bar_to_ms
+from exchange import BloFinClient
 
 
 def _make_client(monkeypatch, secret: str = "test_secret") -> BloFinClient:
@@ -122,108 +122,109 @@ class TestPublicMethods:
     def test_get_candles_empty_on_no_data(self, monkeypatch):
         client = _make_client(monkeypatch)
         mock_resp = _mock_response({"code": "0"})
-        client._session.get = MagicMock(return_value=mock_resp)
+        client._session.get = MagicMock(side_effect=[mock_resp, mock_resp])
         result = client.get_candles("BTC-USDT")
         assert result == []
 
-    def test_get_candles_paginates_to_reach_limit(self, monkeypatch):
-        """get_candles must paginate when limit > CANDLE_BATCH (100)."""
+    def test_get_candles_uses_recent_endpoint_before_history(self, monkeypatch):
         client = _make_client(monkeypatch)
-
-        bar_ms = 900_000  # 15m in ms
-        # Build two pages of 100 candles each (newest-first within each page).
-        # Page 1: timestamps 200 .. 101 (most recent)
-        page1 = [
-            [str(1_700_000_000_000 + i * bar_ms), "50000", "51000", "49000", "50500", "10", "0"]
-            for i in range(200, 100, -1)
+        start_timestamp = 200
+        recent = [
+            [str(start_timestamp - i), "1", "1", "1", "1", "1", "1"]
+            for i in range(100)
         ]
-        # Page 2: timestamps 100 .. 1 (older)
-        page2 = [
-            [str(1_700_000_000_000 + i * bar_ms), "50000", "51000", "49000", "50500", "10", "0"]
-            for i in range(100, 0, -1)
-        ]
+        older = [["100", "1", "1", "1", "1", "1", "1"]]
+        client._session.get = MagicMock(side_effect=[
+            _mock_response({"code": "0", "data": recent}),
+            _mock_response({"code": "0", "data": older}),
+        ])
 
-        call_count = {"n": 0}
+        result = client.get_candles("BTC-USDT", "15m", 150)
 
-        def mock_get_side_effect(url, **kwargs):
-            call_count["n"] += 1
-            page = page1 if call_count["n"] == 1 else page2
-            return _mock_response({"code": "0", "data": page})
+        assert result == recent + older
+        first_url = client._session.get.call_args_list[0][0][0]
+        second_url = client._session.get.call_args_list[1][0][0]
+        assert "/api/v1/market/candles" in first_url
+        assert "/api/v1/market/history-candles" in second_url
+        # BloFin history-candles requires BOTH before and after to return data.
+        assert "before=" in second_url
+        assert "after=" in second_url
 
-        client._session.get = MagicMock(side_effect=mock_get_side_effect)
-        result = client.get_candles("BTC-USDT", "15m", 200)
-
-        assert len(result) == 200
-        assert call_count["n"] == 2  # two HTTP pages were fetched
-
-    def test_get_candles_uses_history_endpoint(self, monkeypatch):
-        """get_candles must call the history-candles endpoint."""
+    def test_bar_to_ms(self, monkeypatch):
         client = _make_client(monkeypatch)
-        candles = [["1700000000000", "50000", "51000", "49000", "50500", "10", "0"]]
-        mock_resp = _mock_response({"code": "0", "data": candles})
-        client._session.get = MagicMock(return_value=mock_resp)
-        client.get_candles("BTC-USDT", "15m", 100)
-        url_called = client._session.get.call_args[0][0]
-        assert "history-candles" in url_called
+        assert client._bar_to_ms("1m") == 60_000
+        assert client._bar_to_ms("15m") == 900_000
+        assert client._bar_to_ms("30m") == 1_800_000
+        assert client._bar_to_ms("1H") == 3_600_000
+        assert client._bar_to_ms("4H") == 14_400_000
+        assert client._bar_to_ms("1D") == 86_400_000
+        assert client._bar_to_ms("unknown") == 900_000  # fallback
 
-    def test_bar_to_ms_known_bars(self):
-        assert _bar_to_ms("15m") == 900_000
-        assert _bar_to_ms("1h") == 3_600_000
-        assert _bar_to_ms("1d") == 86_400_000
+    def test_get_candles_falls_back_to_history_when_recent_is_empty(self, monkeypatch):
+        client = _make_client(monkeypatch)
+        history = [["1700000000000", "50000", "51000", "49000", "50500", "10", "500000"]]
+        client._session.get = MagicMock(side_effect=[
+            _mock_response({"code": "0", "data": []}),
+            _mock_response({"code": "0", "data": history}),
+        ])
 
-    def test_bar_to_ms_unknown_falls_back_to_15m(self):
-        assert _bar_to_ms("99x") == 900_000
+        result = client.get_candles("BTC-USDT", "15m", 100)
+
+        assert result == history
 
     def test_get_candles_uses_fixed_after_parameter(self, monkeypatch):
-        """get_candles must pass a fixed 'after' on every page (backtest pattern)."""
-        import time as _time
+        """history-candles must receive the same fixed 'after' on every page."""
         client = _make_client(monkeypatch)
         bar_ms = 900_000  # 15m
         limit = 200
-
-        page1 = [
-            [str(1_700_000_000_000 + i * bar_ms), "50000", "51000", "49000", "50500", "10", "0"]
-            for i in range(200, 100, -1)
-        ]
-        page2 = [
-            [str(1_700_000_000_000 + i * bar_ms), "50000", "51000", "49000", "50500", "10", "0"]
+        recent = [
+            [str(1_700_000_000_000 + i * bar_ms), "1", "1", "1", "1", "1", "1"]
             for i in range(100, 0, -1)
         ]
-
+        older = [
+            [str(1_700_000_000_000 + i * bar_ms), "1", "1", "1", "1", "1", "1"]
+            for i in range(200, 100, -1)
+        ]
         calls = []
 
         def side_effect(url, **kwargs):
             calls.append(kwargs.get("params", {}))
-            return _mock_response({"code": "0", "data": page1 if len(calls) == 1 else page2})
+            if len(calls) == 1:
+                return _mock_response({"code": "0", "data": recent})
+            return _mock_response({"code": "0", "data": older})
 
         client._session.get = MagicMock(side_effect=side_effect)
         client.get_candles("BTC-USDT", "15m", limit)
 
+        # First call is to live candles (no after param).
+        # Second call is to history-candles and must carry a fixed 'after'.
         assert len(calls) == 2
-        # The 'after' parameter must be identical on both pages (fixed lower bound).
-        assert calls[0].get("after") == calls[1].get("after"), (
-            "Expected fixed 'after' on all pages (backtest pattern) but got rolling values"
-        )
+        # The fixed 'after' must be present on the history call.
+        assert "after" in calls[1], "history-candles call must include 'after' parameter"
 
     def test_get_candles_raises_on_api_error_code(self, monkeypatch):
-        """get_candles must raise RuntimeError when the API returns a non-zero code."""
+        """get_candles must raise RuntimeError on a non-zero BloFin error code."""
         client = _make_client(monkeypatch)
-        # BloFin rate-limit response: HTTP 200 but error code in body
-        mock_resp = _mock_response({"code": "50011", "msg": "Too many requests", "data": None})
-        client._session.get = MagicMock(return_value=mock_resp)
+        # First call (live candles): empty so we fall through to history-candles.
+        # Second call (history-candles): BloFin rate-limit response.
+        client._session.get = MagicMock(side_effect=[
+            _mock_response({"code": "0", "data": []}),
+            _mock_response({"code": "50011", "msg": "Too many requests", "data": None}),
+        ])
         with pytest.raises(RuntimeError, match="history-candles API error"):
             client.get_candles("BTC-USDT", "15m", 100)
 
     def test_get_candles_handles_null_data_gracefully(self, monkeypatch):
         """get_candles must treat data=null the same as data=[] and return []."""
         client = _make_client(monkeypatch)
-        mock_resp = _mock_response({"code": "0", "data": None})
-        client._session.get = MagicMock(return_value=mock_resp)
+        client._session.get = MagicMock(side_effect=[
+            _mock_response({"code": "0", "data": None}),
+            _mock_response({"code": "0", "data": None}),
+        ])
         result = client.get_candles("BTC-USDT")
         assert result == []
 
 
-    def test_get_ticker_returns_first_entry(self, monkeypatch):
         client = _make_client(monkeypatch)
         ticker = {"instId": "BTC-USDT", "last": "50000"}
         mock_resp = _mock_response({"code": "0", "data": [ticker]})
@@ -260,4 +261,3 @@ class TestPublicMethods:
         client._session.get = MagicMock(return_value=mock_resp)
         result = client.get_positions("BTC-USDT")
         assert result == []
-

@@ -24,7 +24,7 @@ let _activeChartSymbol = null;  // selected symbol in Market Context
 let _symbols = [];               // list from /api/symbols
 let _copyTradingEnabled = false; // mirrors the DB copy trading toggle
 let _copyTradingPendingApply = false; // true while user is entering a trader ID
-let _tradingMode = 'realtrading'; // mirrors config.TRADING_MODE
+let _tradingMode = 'papertrading'; // mirrors config.TRADING_MODE
 let _anyBotRunning = false;      // true when any symbol bot is running
 
 // ── Boot ───────────────────────────────────────────────────────────────────
@@ -253,7 +253,7 @@ async function refreshBotStatus() {
   // Mode + equity from active symbol's status
   const activeStatus = allStatus[_activeParamSymbol] || {};
   const modeEl = document.getElementById('kpi-mode');
-  const rawMode = String(activeStatus.trading_mode || 'realtrading').toLowerCase();
+  const rawMode = String(activeStatus.trading_mode || 'papertrading').toLowerCase();
   const displayMode = _copyTradingEnabled ? 'copytrading' : rawMode;
   modeEl.textContent = displayMode.replace('copytrading', 'COPY TRADING').toUpperCase();
   modeEl.className = 'card__value ' + modeClass(displayMode);
@@ -352,7 +352,7 @@ async function loadConfig(sym) {
 
   const tbody= document.querySelector('#param-table tbody');
   tbody.innerHTML = '';
-  const mode = String(cfg.trading_mode || 'realtrading').toLowerCase();
+  const mode = String(cfg.trading_mode || 'papertrading').toLowerCase();
   const rows = [
     ['Symbol',           cfg.symbol],
     ['Trading Mode',     mode],
@@ -634,7 +634,7 @@ async function loadTradingMode() {
   let data;
   try { data = await fetchJSON(`${API}/trading/mode`); } catch { return; }
 
-  _tradingMode = data.mode || 'realtrading';
+  _tradingMode = data.mode || 'papertrading';
   const btnPaper = document.getElementById('mode-btn-paper');
   const btnReal  = document.getElementById('mode-btn-real');
 
@@ -938,4 +938,3 @@ function escHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 }
-

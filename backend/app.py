@@ -27,6 +27,7 @@ POST /api/copytrading/config   – update copy trading settings
 
 from __future__ import annotations
 
+import html as _html
 import os
 import socket
 import sys
@@ -95,7 +96,7 @@ def index():
             html = fh.read()
         html = html.replace(
             "</head>",
-            f'  <meta name="ingress-path" content="{ingress_path}">\n</head>',
+            f'  <meta name="ingress-path" content="{_html.escape(ingress_path, quote=True)}">\n</head>',
         )
         return html, 200, {"Content-Type": "text/html; charset=utf-8"}
     return send_from_directory(_FRONTEND_DIR, "index.html")
@@ -438,7 +439,9 @@ def api_trading_mode_set():
     old_mode = config.TRADING_MODE
     config.TRADING_MODE = new_mode
     # Recreate bot instances so they pick up the new mode on next start.
-    _bots.clear()
+    # Hold the lock so concurrent _get_bot() calls don't race with the clear.
+    with _bots_lock:
+        _bots.clear()
     # Switch to the mode-specific database so all subsequent reads/writes
     # target the correct data store.
     db.switch_db(new_mode, config.COPY_TRADING_ENABLED)
@@ -512,7 +515,10 @@ def api_market_context():
     fetch_limit = max(limit, _MIN_BARS)
 
     client = BloFinClient()
-    raw = client.get_candles(symbol, bar=config.TIMEFRAME, limit=fetch_limit)
+    try:
+        raw = client.get_candles(symbol, bar=config.TIMEFRAME, limit=fetch_limit)
+    finally:
+        client._session.close()
     if not raw:
         return jsonify({"ok": False, "message": "No market candles available"}), 502
 
@@ -618,7 +624,8 @@ def api_copytrading_set():
         if any_running:
             return jsonify({"ok": False, "message": "Stop all bots before switching strategy mode"}), 409
         config.COPY_TRADING_ENABLED = enabled
-        _bots.clear()
+        with _bots_lock:
+            _bots.clear()
         db.switch_db(config.TRADING_MODE, enabled)
 
     db.set_copy_trading_config(enabled=enabled, trader_id=trader_id)

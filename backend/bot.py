@@ -90,6 +90,27 @@ class TradingBot:
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
+    def _read_copy_trading_config(self, source: str) -> dict:
+        """Return copy-trading config, preserving last-known state on DB errors."""
+        try:
+            ct = db.get_copy_trading_config()
+        except Exception as exc:  # noqa: BLE001
+            db.log_event(
+                f"Failed to read copy trading config ({source}): {exc}",
+                level="WARNING",
+            )
+            return {
+                "enabled": bool(self._copy_trading),
+                "trader_id": self._copy_trader_id,
+            }
+
+        self._copy_trading = bool(ct.get("enabled", False))
+        self._copy_trader_id = ct.get("trader_id", "") or ""
+        return {
+            "enabled": self._copy_trading,
+            "trader_id": self._copy_trader_id,
+        }
+
     def start(self) -> None:
         with self._lock:
             if self._running:
@@ -98,9 +119,7 @@ class TradingBot:
             self._stop_event.clear()
         # Refresh copy trading settings from DB so runtime changes take effect
         # without requiring a server restart.
-        ct = db.get_copy_trading_config()
-        self._copy_trading = ct.get("enabled", False)
-        self._copy_trader_id = ct.get("trader_id", "") or ""
+        ct = self._read_copy_trading_config("start")
         if self._copy_trading and self._copy_trader_id:
             db.log_event(
                 f"Copy trading ENABLED for {self.symbol} (trader: {self._copy_trader_id})"
@@ -145,16 +164,7 @@ class TradingBot:
         db.log_event("Trading loop started")
         while self._running:
             # Re-read copy trading flag so mode switches take effect immediately.
-            try:
-                ct = db.get_copy_trading_config()
-                self._copy_trading = bool(ct.get("enabled", False))
-                self._copy_trader_id = ct.get("trader_id", "")
-            except Exception as exc:  # noqa: BLE001
-                db.log_event(f"Failed to read copy trading config: {exc}", level="WARNING")
-                ct = {
-                    "enabled": self._copy_trading,
-                    "trader_id": self._copy_trader_id,
-                }
+            ct = self._read_copy_trading_config("run_loop")
             copy_active = bool(ct.get("enabled", False)) and bool(ct.get("trader_id", ""))
 
             if copy_active:
@@ -235,9 +245,7 @@ class TradingBot:
             )
 
         # ── Re-read copy config (supports runtime toggling) ─────────────────
-        ct = db.get_copy_trading_config()
-        self._copy_trading = ct.get("enabled", False)
-        self._copy_trader_id = ct.get("trader_id", "") or ""
+        ct = self._read_copy_trading_config("copy_tick")
 
         if self._copy_trading and self._copy_trader_id:
             self._tick_copy_trading(open_trades, exchange_has_pos, last_price, equity)
@@ -336,9 +344,7 @@ class TradingBot:
         # ── Generate signal ───────────────────────────────────────────────────
         # Re-read copy trading config each tick so runtime changes take effect
         # within one candle cycle without needing a bot restart.
-        ct = db.get_copy_trading_config()
-        self._copy_trading = ct.get("enabled", False)
-        self._copy_trader_id = ct.get("trader_id", "") or ""
+        ct = self._read_copy_trading_config("strategy_tick")
 
         if self._copy_trading and self._copy_trader_id:
             self._tick_copy_trading(open_trades, exchange_has_pos, last_price, equity)
@@ -445,7 +451,11 @@ class TradingBot:
 
         for t in all_open:
             notional = t["size"] * t["entry_price"]
-            margin = notional / self.leverage
+            # Use the leverage recorded when the trade was opened, not the
+            # current bot's leverage, so cross-symbol positions are sized
+            # correctly.
+            trade_lev = t.get("leverage") or self.leverage
+            margin = notional / trade_lev
             # Risk = distance from entry to SL × size
             risk = t["size"] * abs(t["entry_price"] - t["sl_price"])
             total_notional += notional
@@ -778,13 +788,9 @@ class TradingBot:
         so the threshold is stable even when unrealised PnL fluctuates.
         """
         today = datetime.now(timezone.utc).date().isoformat()
-        # Portfolio-wide: all symbols' trades for today
-        trades = db.get_trade_history(symbol=None, limit=200)
-        daily_pnl = sum(
-            t["pnl"] or 0
-            for t in trades
-            if (t.get("closed_at") or "").startswith(today)
-        )
+        # Portfolio-wide: use a date-scoped DB query so active portfolios with
+        # more than a few hundred daily trades don't silently under-report.
+        daily_pnl = db.get_daily_pnl(today)
         # Use a stable denominator: paper start equity for paper mode,
         # current equity for real mode (best available proxy).
         denom = (

@@ -27,32 +27,6 @@ except ImportError:
     config = importlib.import_module("config")
 
 
-# ── Bar-duration helper ───────────────────────────────────────────────────────
-
-_BAR_MS: dict[str, int] = {
-    "1m":  60_000,
-    "3m":  180_000,
-    "5m":  300_000,
-    "15m": 900_000,
-    "30m": 1_800_000,
-    "1h":  3_600_000,
-    "2h":  7_200_000,
-    "4h":  14_400_000,
-    "6h":  21_600_000,
-    "12h": 43_200_000,
-    "1d":  86_400_000,
-    "1w":  604_800_000,
-}
-
-
-def _bar_to_ms(bar: str) -> int:
-    """Return the duration of one candlestick bar in milliseconds.
-
-    Falls back to 900 000 ms (15 minutes) for unrecognised bar strings.
-    """
-    return _BAR_MS.get(bar, 900_000)
-
-
 class BloFinClient:
     """Thin wrapper around the BloFin REST API."""
 
@@ -102,7 +76,7 @@ class BloFinClient:
         url = self.BASE_URL + signed_path
         nonce = str(uuid4())
         headers = self._headers("GET", signed_path, nonce)
-        resp = self._session.get(url, headers=headers, timeout=10)
+        resp = self._session.get(url, headers=headers, timeout=(5, 10))
         resp.raise_for_status()
         return resp.json()
 
@@ -111,92 +85,145 @@ class BloFinClient:
         nonce = str(uuid4())
         headers = self._headers("POST", path, nonce, body)
         url = self.BASE_URL + path
-        resp = self._session.post(url, headers=headers, data=body, timeout=10)
+        resp = self._session.post(url, headers=headers, data=body, timeout=(5, 10))
         resp.raise_for_status()
         return resp.json()
 
     # ── Market data (public) ──────────────────────────────────────────────────
 
-    #: BloFin hard-caps every candle endpoint at 100 rows per request.
-    CANDLE_BATCH: int = 100
+    # Map bar-string suffixes to milliseconds so ``get_candles`` can compute
+    # the ``after`` lower-bound required by the BloFin history-candles endpoint.
+    _BAR_SUFFIX_MS: dict[str, int] = {
+        "m": 60_000,
+        "H": 3_600_000,
+        "D": 86_400_000,
+        "W": 604_800_000,
+    }
+
+    @staticmethod
+    def _bar_to_ms(bar: str) -> int:
+        """Convert a BloFin bar string (e.g. ``"15m"``, ``"4H"``) to milliseconds."""
+        for suffix, ms in BloFinClient._BAR_SUFFIX_MS.items():
+            if bar.endswith(suffix):
+                try:
+                    return int(bar[:-1]) * ms
+                except ValueError:
+                    pass
+        return 900_000  # safe default: 15m
 
     def get_candles(
         self, symbol: str, bar: str = "15m", limit: int = 200
     ) -> list[list]:
-        """Fetch OHLCV candlestick data, paginating as needed.
-
-        BloFin hard-caps ``/api/v1/market/candles`` at 100 rows per request.
-        When *limit* > 100 this method fetches multiple pages via the public
-        ``/api/v1/market/history-candles`` endpoint (which accepts
-        ``before``/``after`` cursor parameters) and stitches them together.
-
-        Pagination mirrors the approach used in ``backtest/fetch_data.py``
-        which is proven to work against the live BloFin API:
-        - ``after`` is a **fixed** lower-bound timestamp set once (far enough
-          in the past to cover the full *limit* with a 2× safety buffer).
-        - ``before`` advances backwards with each page.
-
-        Returns candles in **newest-first** order (same as the raw BloFin
-        response) so the existing ``_candles_to_df`` helper can reverse them
-        without changes.
-
-        Raises ``RuntimeError`` if BloFin returns an API-level error code
-        (``code != "0"``) so that ``_call_with_retries`` can re-try the full
-        fetch rather than silently accepting a partial result.
         """
-        bar_ms = _bar_to_ms(bar)
-        batch = self.CANDLE_BATCH
+        Fetch OHLCV candlestick data.
+
+        BloFin's API allows at most 100 candles per request. This method first
+        reads the freshest page from the regular ``candles`` endpoint, then
+        paginates older data via ``history-candles`` when the caller requests
+        more than 100 bars. This avoids false empty responses from
+        ``history-candles`` while still honoring the 100-candle cap.
+
+        The ``history-candles`` endpoint requires **both** ``before`` and
+        ``after`` query parameters – omitting ``after`` causes BloFin to return
+        an empty result set even when data exists.  ``after`` is set once to a
+        fixed lower bound (``limit × bar_ms × 2`` before now) and reused on
+        every page so the window never narrows as the cursor advances.  This
+        mirrors the proven pattern used in ``backtest/fetch_data.py``.
+
+        BloFin may return HTTP 200 with a non-zero error code in the JSON body
+        (e.g. rate-limit code ``50011``).  This method raises ``RuntimeError``
+        on any non-``"0"`` code so that ``_call_with_retries`` can retry the
+        full fetch instead of silently returning a partial result.
+
+        Returns list of [ts, open, high, low, close, vol, volCcy].
+        """
+        BLOFIN_MAX = 100  # confirmed hard limit from BloFin API
+        live_path = "/api/v1/market/candles"
+        history_path = "/api/v1/market/history-candles"
         all_candles: list[list] = []
+        remaining = limit
+        bar_ms = self._bar_to_ms(bar)
 
-        now_ms = int(time.time() * 1000)
         # Fixed lower bound: far enough back to cover *limit* candles with a
-        # 2× buffer.  Passed as the constant ``after`` parameter on every page
-        # request, exactly as backtest/fetch_data.py does.
+        # 2× buffer.  Passed as the constant ``after`` parameter on every
+        # history-candles page — never updated as the cursor advances.
+        # This is the same approach used in backtest/fetch_data.py.
+        now_ms = int(time.time() * 1000)
         start_ms = now_ms - limit * bar_ms * 2
-        # Start cursor just past "now" so the most recently closed candle is
-        # always included in the first page.
-        before_ms = now_ms + bar_ms
 
-        while len(all_candles) < limit:
-            params = {
+        def _oldest_ts(batch: list[list]) -> int | None:
+            try:
+                return int(batch[-1][0])
+            except (IndexError, TypeError, ValueError):
+                return None
+
+        # Fetch the most recent page from the live candles endpoint first.
+        first_batch_size = min(remaining, BLOFIN_MAX)
+        first_params: dict[str, Any] = {
+            "instId": symbol,
+            "bar": bar,
+            "limit": first_batch_size,
+        }
+        first_resp = self._get(live_path, first_params)
+        first_batch = first_resp.get("data") or []
+        if first_batch:
+            all_candles.extend(first_batch)
+            remaining -= len(first_batch)
+
+            if remaining <= 0 or len(first_batch) < first_batch_size:
+                return all_candles
+
+            # The history endpoint returns candles strictly older than ``before``.
+            before_ts = _oldest_ts(first_batch)
+            if before_ts is None:
+                return all_candles
+        else:
+            # Fall back to history pagination if the live endpoint is empty.
+            before_ts = now_ms
+
+        while remaining > 0:
+            batch_size = min(remaining, BLOFIN_MAX)
+            params: dict[str, Any] = {
                 "instId": symbol,
                 "bar": bar,
-                "limit": batch,
-                "before": str(before_ms),
+                "limit": batch_size,
+                # Return candles with timestamp strictly older than before_ts.
+                "before": str(before_ts),
+                # Fixed lower bound: do NOT narrow this on each page.
+                # A rolling after_ts causes BloFin to return empty pages when
+                # the cursor advances past the rolling window boundary.
                 "after": str(start_ms),
             }
-            resp = self._get("/api/v1/market/history-candles", params)
 
-            # BloFin may return HTTP 200 with an error code in the JSON body
-            # (e.g. rate-limit: code "50011").  Raise so _call_with_retries
-            # can retry the full fetch rather than silently returning a
-            # partial result.
+            resp = self._get(history_path, params)
+            # BloFin may return HTTP 200 with a non-zero error code (e.g. rate
+            # limit: code "50011").  Raise so _call_with_retries retries the
+            # full fetch rather than silently accepting a partial result.
             api_code = resp.get("code", "0")
             if api_code != "0":
                 raise RuntimeError(
                     f"history-candles API error: code={api_code} "
                     f"msg={resp.get('msg', '')}"
                 )
-
-            # ``data`` may be null/None when the response body is valid JSON
-            # but contains no candles; use ``or []`` to normalise.
-            page: list[list] = resp.get("data") or []
-
-            if not page:
+            batch = resp.get("data") or []
+            if not batch:
                 break
 
-            all_candles.extend(page)
+            all_candles.extend(batch)
+            remaining -= len(batch)
 
-            # Advance the cursor to just before the oldest candle received.
-            oldest_ts = int(page[-1][0])
-            if oldest_ts >= before_ms:
-                break  # no forward progress – safety guard
-            before_ms = oldest_ts
+            if len(batch) < batch_size:
+                break  # fewer candles available than requested; stop paging
 
-            if len(page) < batch:
-                break  # API has no more history within the window
+            # Advance cursor: oldest candle in this batch is the last element
+            # (BloFin returns newest-first).  Pass its timestamp as the next
+            # ``before`` value so the next page starts strictly before it.
+            oldest_ts = _oldest_ts(batch)
+            if oldest_ts is None or oldest_ts >= before_ts:
+                break
+            before_ts = oldest_ts
 
-        return all_candles[:limit]
+        return all_candles
 
     def get_ticker(self, symbol: str) -> dict:
         path = "/api/v1/market/tickers"
