@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.26
+- fix: `get_candles` pagination now uses a **fixed** `after` lower-bound (mirrors the proven pattern in `backtest/fetch_data.py`) instead of a rolling window. Previously the rolling `after_ms = before_ms - 200×bar_ms` could cause BloFin to return an empty second page in certain API states, leaving the bot stuck at "Collecting candles (100/200)".
+- fix: `get_candles` now checks the API response `code` field and raises `RuntimeError` on any non-`"0"` code (e.g. rate-limit `50011`). This ensures `_call_with_retries` retries the full fetch instead of silently accepting a partial 100-candle result.
+- fix: `get_candles` treats `data=null` in the API response the same as `data=[]`, preventing a `TypeError` if BloFin returns a null data field.
+
 ## 1.7.25
 - fix: `get_candles` now paginates via `/api/v1/market/history-candles` — BloFin hard-caps the standard candles endpoint at 100 rows so requesting `limit=200` only returned 100, leaving the bot permanently stuck at "Collecting candles (100/200)". The new implementation fetches multiple 100-row pages until the requested count is satisfied, using `before`/`after` cursor parameters as required by the history endpoint.
 

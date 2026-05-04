@@ -174,7 +174,55 @@ class TestPublicMethods:
     def test_bar_to_ms_unknown_falls_back_to_15m(self):
         assert _bar_to_ms("99x") == 900_000
 
-    def test_get_ticker_returns_first_entry(self, monkeypatch):
+    def test_get_candles_uses_fixed_after_parameter(self, monkeypatch):
+        """get_candles must pass a fixed 'after' on every page (backtest pattern)."""
+        import time as _time
+        client = _make_client(monkeypatch)
+        bar_ms = 900_000  # 15m
+        limit = 200
+
+        page1 = [
+            [str(1_700_000_000_000 + i * bar_ms), "50000", "51000", "49000", "50500", "10", "0"]
+            for i in range(200, 100, -1)
+        ]
+        page2 = [
+            [str(1_700_000_000_000 + i * bar_ms), "50000", "51000", "49000", "50500", "10", "0"]
+            for i in range(100, 0, -1)
+        ]
+
+        calls = []
+
+        def side_effect(url, **kwargs):
+            calls.append(kwargs.get("params", {}))
+            return _mock_response({"code": "0", "data": page1 if len(calls) == 1 else page2})
+
+        client._session.get = MagicMock(side_effect=side_effect)
+        client.get_candles("BTC-USDT", "15m", limit)
+
+        assert len(calls) == 2
+        # The 'after' parameter must be identical on both pages (fixed lower bound).
+        assert calls[0].get("after") == calls[1].get("after"), (
+            "Expected fixed 'after' on all pages (backtest pattern) but got rolling values"
+        )
+
+    def test_get_candles_raises_on_api_error_code(self, monkeypatch):
+        """get_candles must raise RuntimeError when the API returns a non-zero code."""
+        client = _make_client(monkeypatch)
+        # BloFin rate-limit response: HTTP 200 but error code in body
+        mock_resp = _mock_response({"code": "50011", "msg": "Too many requests", "data": None})
+        client._session.get = MagicMock(return_value=mock_resp)
+        with pytest.raises(RuntimeError, match="history-candles API error"):
+            client.get_candles("BTC-USDT", "15m", 100)
+
+    def test_get_candles_handles_null_data_gracefully(self, monkeypatch):
+        """get_candles must treat data=null the same as data=[] and return []."""
+        client = _make_client(monkeypatch)
+        mock_resp = _mock_response({"code": "0", "data": None})
+        client._session.get = MagicMock(return_value=mock_resp)
+        result = client.get_candles("BTC-USDT")
+        assert result == []
+
+
         client = _make_client(monkeypatch)
         ticker = {"instId": "BTC-USDT", "last": "50000"}
         mock_resp = _mock_response({"code": "0", "data": [ticker]})

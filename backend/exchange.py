@@ -126,52 +126,75 @@ class BloFinClient:
         """Fetch OHLCV candlestick data, paginating as needed.
 
         BloFin hard-caps ``/api/v1/market/candles`` at 100 rows per request.
-        When *limit* > 100 this method fetches multiple pages via
-        ``/api/v1/market/history-candles`` (which accepts ``before``/``after``
-        cursor parameters) and stitches them together.
+        When *limit* > 100 this method fetches multiple pages via the public
+        ``/api/v1/market/history-candles`` endpoint (which accepts
+        ``before``/``after`` cursor parameters) and stitches them together.
+
+        Pagination mirrors the approach used in ``backtest/fetch_data.py``
+        which is proven to work against the live BloFin API:
+        - ``after`` is a **fixed** lower-bound timestamp set once (far enough
+          in the past to cover the full *limit* with a 2× safety buffer).
+        - ``before`` advances backwards with each page.
 
         Returns candles in **newest-first** order (same as the raw BloFin
         response) so the existing ``_candles_to_df`` helper can reverse them
         without changes.
+
+        Raises ``RuntimeError`` if BloFin returns an API-level error code
+        (``code != "0"``) so that ``_call_with_retries`` can re-try the full
+        fetch rather than silently accepting a partial result.
         """
         bar_ms = _bar_to_ms(bar)
         batch = self.CANDLE_BATCH
         all_candles: list[list] = []
 
-        # ``before`` is an exclusive upper-bound timestamp in milliseconds.
-        # Add one bar so the most recently closed candle is always included.
-        before_ms = int(time.time() * 1000) + bar_ms
+        now_ms = int(time.time() * 1000)
+        # Fixed lower bound: far enough back to cover *limit* candles with a
+        # 2× buffer.  Passed as the constant ``after`` parameter on every page
+        # request, exactly as backtest/fetch_data.py does.
+        start_ms = now_ms - limit * bar_ms * 2
+        # Start cursor just past "now" so the most recently closed candle is
+        # always included in the first page.
+        before_ms = now_ms + bar_ms
 
         while len(all_candles) < limit:
-            fetch_n = min(limit - len(all_candles), batch)
-            # ``after`` (inclusive lower bound) must always be provided –
-            # BloFin returns an empty list when it is omitted.  Use a window
-            # that is 2× the batch size wide to guarantee *fetch_n* results.
-            after_ms = before_ms - fetch_n * bar_ms * 2
-
             params = {
                 "instId": symbol,
                 "bar": bar,
-                "limit": fetch_n,
+                "limit": batch,
                 "before": str(before_ms),
-                "after": str(after_ms),
+                "after": str(start_ms),
             }
             resp = self._get("/api/v1/market/history-candles", params)
-            page: list[list] = resp.get("data", [])
+
+            # BloFin may return HTTP 200 with an error code in the JSON body
+            # (e.g. rate-limit: code "50011").  Raise so _call_with_retries
+            # can retry the full fetch rather than silently returning a
+            # partial result.
+            api_code = resp.get("code", "0")
+            if api_code != "0":
+                raise RuntimeError(
+                    f"history-candles API error: code={api_code} "
+                    f"msg={resp.get('msg', '')}"
+                )
+
+            # ``data`` may be null/None when the response body is valid JSON
+            # but contains no candles; use ``or []`` to normalise.
+            page: list[list] = resp.get("data") or []
 
             if not page:
                 break
 
             all_candles.extend(page)
 
-            # Advance the cursor to before the oldest candle just received.
+            # Advance the cursor to just before the oldest candle received.
             oldest_ts = int(page[-1][0])
             if oldest_ts >= before_ms:
                 break  # no forward progress – safety guard
             before_ms = oldest_ts
 
-            if len(page) < fetch_n:
-                break  # API has no more history
+            if len(page) < batch:
+                break  # API has no more history within the window
 
         return all_candles[:limit]
 
