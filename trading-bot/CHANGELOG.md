@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.39
+- fix: fixed-after param + API error detection in get_candles, merged onto main v1.7.37 (v1.7.38)
+- fix: restore missing ticker variable in test_get_ticker_returns_first_entry
+- fix: use fixed after param and detect API errors in get_candles (v1.7.26)
+- fix: paginate get_candles via history-candles to collect 200+ bars (v1.7.25)
+
 ## 1.7.38
 - fix: `get_candles` now uses a **fixed** `after` lower-bound (same approach as `backtest/fetch_data.py`) instead of a rolling `after_ts = before_ts - batch×bar_ms×2`. The rolling window narrowed as the cursor advanced, causing BloFin to silently return an empty second page, leaving all symbols permanently stuck at "Collecting candles (100/200)".
 - fix: `get_candles` raises `RuntimeError` on any non-`"0"` BloFin error code (e.g. rate-limit `50011`) so `_call_with_retries` retries the full fetch instead of silently accepting a partial result.
