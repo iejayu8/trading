@@ -223,7 +223,7 @@ class TestPublicMethods:
         result = client.get_candles("BTC-USDT")
         assert result == []
 
-
+    def test_get_ticker_returns_first_entry(self, monkeypatch):
         client = _make_client(monkeypatch)
         ticker = {"instId": "BTC-USDT", "last": "50000"}
         mock_resp = _mock_response({"code": "0", "data": [ticker]})
