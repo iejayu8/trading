@@ -182,6 +182,14 @@ class TradingBot:
                     self._tick()
                 except Exception as exc:  # noqa: BLE001
                     db.log_event(f"Error in tick: {exc}", level="ERROR")
+                    try:
+                        db.update_bot_status(
+                            symbol=self.symbol,
+                            signal_hint="WAIT",
+                            waiting_for="Tick error – retrying on next candle",
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass  # don't let a DB failure mask the original tick error
 
                 # Sleep until the next 15-min candle boundary (+ 5 s buffer)
                 now = time.time()
@@ -295,6 +303,11 @@ class TradingBot:
         )
         if not raw:
             db.log_event("No candle data received", level="WARNING")
+            db.update_bot_status(
+                symbol=self.symbol,
+                signal_hint="WAIT",
+                waiting_for="No candle data received",
+            )
             return
 
         df = _candles_to_df(raw)

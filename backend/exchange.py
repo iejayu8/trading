@@ -165,6 +165,17 @@ class BloFinClient:
             "limit": first_batch_size,
         }
         first_resp = self._get(live_path, first_params)
+        # Check for non-zero error codes on the live endpoint, consistent with
+        # the history endpoint check below.  A rate-limit or auth error on the
+        # live endpoint (e.g. code "50011") must raise so _call_with_retries
+        # can retry the full fetch instead of silently falling back to history
+        # with partial data.
+        live_api_code = first_resp.get("code", "0")
+        if live_api_code != "0":
+            raise RuntimeError(
+                f"live-candles API error: code={live_api_code} "
+                f"msg={first_resp.get('msg', '')}"
+            )
         first_batch = first_resp.get("data") or []
         if first_batch:
             all_candles.extend(first_batch)
