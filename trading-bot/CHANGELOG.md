@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.7.41
+- fix: live-candle error check, tick status updates on empty data and errors (v1.7.40)
+
 ## 1.7.40
 - fix: add error-code check for the live `/api/v1/market/candles` endpoint in `get_candles`; a rate-limit (e.g. `50011`) or other non-`"0"` response was silently ignored, causing history pagination to be attempted without a retry — now raises `RuntimeError` consistent with the history endpoint check so `_call_with_retries` can retry the full fetch
 - fix: `_tick` now calls `db.update_bot_status(waiting_for="No candle data received")` before returning early when `get_candles` returns `[]`; previously the status was never updated in this path, leaving the UI permanently showing the default `"Collecting candles"` message with no indication of an API error
