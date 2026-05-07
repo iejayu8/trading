@@ -397,6 +397,42 @@ class TestTick:
         messages = [l["message"] for l in logs]
         assert any("No candle data" in m for m in messages)
 
+    def test_tick_no_candles_updates_bot_status(self, monkeypatch):
+        """When get_candles returns [] the bot_status waiting_for is updated so the
+        UI shows 'No candle data received' instead of the stale default 'Collecting
+        candles', which was the root cause of the 'permanent wait step' report."""
+        monkeypatch.setattr(config, "TRADING_MODE", "papertrading")
+        monkeypatch.setattr(config, "PAPER_START_EQUITY", 1000.0)
+        bot = TradingBot(symbol="BTC-USDT")
+        monkeypatch.setattr(bot._client, "get_candles", lambda *a, **kw: [])
+        bot._tick()
+
+        status = db.get_bot_status("BTC-USDT")
+        assert status.get("waiting_for") == "No candle data received"
+        assert status.get("signal_hint") == "WAIT"
+
+    def test_run_loop_tick_error_updates_bot_status(self, monkeypatch):
+        """When _tick raises (e.g. after all API retries fail), _run_loop updates
+        bot_status to 'Tick error' so the user can see the API problem instead of
+        the stale 'Collecting candles' default."""
+        monkeypatch.setattr(config, "TRADING_MODE", "papertrading")
+        monkeypatch.setattr(config, "PAPER_START_EQUITY", 1000.0)
+        bot = TradingBot(symbol="BTC-USDT")
+
+        def exploding_tick():
+            raise RuntimeError("get_candles failed after 3 attempts")
+
+        monkeypatch.setattr(bot, "_tick", exploding_tick)
+        # Make _stop_event.wait return True immediately so the loop exits
+        # after the first tick without sleeping 15 minutes.
+        monkeypatch.setattr(bot._stop_event, "wait", lambda timeout=None: True)
+
+        bot._running = True
+        bot._run_loop()
+
+        status = db.get_bot_status("BTC-USDT")
+        assert status.get("waiting_for") == "Tick error \u2013 retrying on next candle"
+
     def test_tick_processes_candles_paper_mode(self, monkeypatch):
         """_tick fetches candles, computes indicators, updates status."""
         monkeypatch.setattr(config, "TRADING_MODE", "papertrading")

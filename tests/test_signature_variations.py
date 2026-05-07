@@ -213,6 +213,17 @@ class TestPublicMethods:
         with pytest.raises(RuntimeError, match="history-candles API error"):
             client.get_candles("BTC-USDT", "15m", 100)
 
+    def test_get_candles_raises_on_live_api_error_code(self, monkeypatch):
+        """get_candles must raise RuntimeError when the live endpoint itself returns a
+        non-zero code (e.g. rate-limit 50011).  Without this check the error would be
+        silently swallowed and history pagination attempted with partial data."""
+        client = _make_client(monkeypatch)
+        client._session.get = MagicMock(return_value=_mock_response(
+            {"code": "50011", "msg": "Too many requests", "data": None}
+        ))
+        with pytest.raises(RuntimeError, match="live-candles API error"):
+            client.get_candles("BTC-USDT", "15m", 100)
+
     def test_get_candles_handles_null_data_gracefully(self, monkeypatch):
         """get_candles must treat data=null the same as data=[] and return []."""
         client = _make_client(monkeypatch)
