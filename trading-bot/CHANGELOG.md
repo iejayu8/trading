@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.0.3
+- chore: update version to 2.0.2 in changelog and config
+
 ## 2.0.2
 - chore: update version after merge [PATCH]
 
