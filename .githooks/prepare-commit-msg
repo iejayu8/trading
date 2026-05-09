@@ -1,0 +1,78 @@
+#!/bin/sh
+# prepare-commit-msg hook: auto-bump version based on commit message keywords
+# Include [MAJOR], [MINOR], or [PATCH] in your commit message
+# Defaults to [PATCH] if no keyword found
+# Examples:
+#   "fix: some bug [PATCH]"
+#   "feat: new feature [MINOR]"
+#   "breaking: redesign [MAJOR]"
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+CONFIG_FILE="$REPO_ROOT/trading-bot/config.json"
+CHANGELOG_FILE="$REPO_ROOT/trading-bot/CHANGELOG.md"
+COMMIT_MSG_FILE="$1"
+
+# Only run if these files exist
+if [ ! -f "$CONFIG_FILE" ] || [ ! -f "$CHANGELOG_FILE" ]; then
+    exit 0
+fi
+
+# Read the commit message
+COMMIT_MSG=$(cat "$COMMIT_MSG_FILE" | grep -v "^#" | head -1)
+
+# Skip if message is empty or a merge/rebase message
+if [ -z "$COMMIT_MSG" ] || echo "$COMMIT_MSG" | grep -q "^Merge\|^Rebase"; then
+    exit 0
+fi
+
+# Detect bump type from commit message
+BUMP_TYPE="patch"  # default
+echo "$COMMIT_MSG" | grep -qi "\[MAJOR\]" && BUMP_TYPE="major"
+echo "$COMMIT_MSG" | grep -qi "\[MINOR\]" && BUMP_TYPE="minor"
+echo "$COMMIT_MSG" | grep -qi "\[PATCH\]" && BUMP_TYPE="patch"
+
+# Extract current version from config.json
+CURRENT_VERSION=$(grep '"version"' "$CONFIG_FILE" | head -1 | sed 's/.*"version": "\([^"]*\)".*/\1/')
+
+if [ -z "$CURRENT_VERSION" ]; then
+    echo "Error: Could not extract version from config.json" >&2
+    exit 1
+fi
+
+# Parse version components
+MAJOR=$(echo "$CURRENT_VERSION" | cut -d. -f1)
+MINOR=$(echo "$CURRENT_VERSION" | cut -d. -f2)
+PATCH=$(echo "$CURRENT_VERSION" | cut -d. -f3)
+
+# Bump version based on type
+case "$BUMP_TYPE" in
+    major)
+        MAJOR=$((MAJOR + 1))
+        MINOR=0
+        PATCH=0
+        ;;
+    minor)
+        MINOR=$((MINOR + 1))
+        PATCH=0
+        ;;
+    patch)
+        PATCH=$((PATCH + 1))
+        ;;
+esac
+
+NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+
+# Update config.json
+sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$NEW_VERSION\"/" "$CONFIG_FILE"
+
+# Add entry to CHANGELOG.md (insert after "# Changelog" line)
+CHANGELOG_ENTRY="## $NEW_VERSION
+- $COMMIT_MSG"
+
+# Insert after the first line (# Changelog)
+sed -i "2i\\$CHANGELOG_ENTRY\n" "$CHANGELOG_FILE"
+
+# Stage the updated files
+git add "$CONFIG_FILE" "$CHANGELOG_FILE"
+
+echo "[prepare-commit-msg] Bumped version: $CURRENT_VERSION → $NEW_VERSION ($BUMP_TYPE)"

@@ -1,59 +1,6 @@
-# trading
+# Trading Bot - Home Assistant Add-on
 
-## Developer Setup
-
-After cloning, run the one-time setup script to activate the project's git hooks:
-
-```sh
-sh setup-hooks.sh
-```
-
-This sets `core.hooksPath = .githooks` so the **pre-commit hook** runs automatically on every `git commit`.
-
-### What the pre-commit hook does
-
-`backend/` and `frontend/` are the source-of-truth.  
-On every commit the hook mirrors both directories into `trading-bot/backend/` and `trading-bot/frontend/` (the Home Assistant add-on copy) so the two are always in sync.  
-SQLite database files (`*.db`, `*.db-shm`, `*.db-wal`) are excluded from the mirror.
-
----
-
-## Backend Import Policy
-
-Backend modules prefer package-relative imports (for example, `from . import config`).
-
-Some workflows in this repository still execute backend modules in direct-module mode
-(tests and certain local tooling), where package-relative imports are unavailable. For
-that reason, selected backend files keep a narrow `ImportError` fallback to absolute
-imports.
-
-In short:
-
-- Preferred runtime mode: `python -m backend.app`
-- Supported compatibility mode: direct module imports with fallback
-
-This keeps package execution as the standard while preserving compatibility during
-migration.
-
-## Run As Windows Desktop App
-
-This repository also includes a desktop launcher for Windows:
-
-1. Install dependencies:
-	- `pip install -r backend/requirements.txt`
-	- `pip install -r requirements_desktop.txt`
-2. Run from source:
-	- `python desktop_app.py`
-3. Or build an executable:
-	- `build_exe.bat`
-
-Desktop-specific files are:
-
-- `desktop_app.py`
-- `build_exe.bat`
-- `requirements_desktop.txt`
-
-The desktop launcher always runs the same root application code from `backend` and `frontend`.
+Home Assistant add-on for automated trading with BloFin exchange.
 
 ## Run In Home Assistant
 
