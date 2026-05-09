@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.0.2
+- chore: update version after merge [PATCH]
+
 ## 2.0.1
 - merge: resolve conflicts with origin/main - keep consolidated structure [PATCH]
 
