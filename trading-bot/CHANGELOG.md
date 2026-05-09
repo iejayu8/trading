@@ -1,29 +1,10 @@
 # Changelog
 
-## 1.7.41
-- fix: live-candle error check, tick status updates on empty data and errors (v1.7.40)
+## 2.0.1
+- merge: resolve conflicts with origin/main - keep consolidated structure [PATCH]
 
-## 1.7.40
-- fix: add error-code check for the live `/api/v1/market/candles` endpoint in `get_candles`; a rate-limit (e.g. `50011`) or other non-`"0"` response was silently ignored, causing history pagination to be attempted without a retry — now raises `RuntimeError` consistent with the history endpoint check so `_call_with_retries` can retry the full fetch
-- fix: `_tick` now calls `db.update_bot_status(waiting_for="No candle data received")` before returning early when `get_candles` returns `[]`; previously the status was never updated in this path, leaving the UI permanently showing the default `"Collecting candles"` message with no indication of an API error
-- fix: `_run_loop` now updates `bot_status(waiting_for="Tick error – retrying on next candle")` when `_tick` raises an exception (e.g. after all API retries are exhausted); previously a persistent API failure left a stale "Collecting candles" status with no error feedback
-- test: add `test_get_candles_raises_on_live_api_error_code` covering the new live-endpoint code check
-- test: add `test_tick_no_candles_updates_bot_status` and `test_run_loop_tick_error_updates_bot_status` covering the two new `bot_status` update paths
-
-## 1.7.39
-- fix: fixed-after param + API error detection in get_candles, merged onto main v1.7.37 (v1.7.38)
-- fix: restore missing ticker variable in test_get_ticker_returns_first_entry
-- fix: use fixed after param and detect API errors in get_candles (v1.7.26)
-- fix: paginate get_candles via history-candles to collect 200+ bars (v1.7.25)
-
-## 1.7.38
-- fix: `get_candles` now uses a **fixed** `after` lower-bound (same approach as `backtest/fetch_data.py`) instead of a rolling `after_ts = before_ts - batch×bar_ms×2`. The rolling window narrowed as the cursor advanced, causing BloFin to silently return an empty second page, leaving all symbols permanently stuck at "Collecting candles (100/200)".
-- fix: `get_candles` raises `RuntimeError` on any non-`"0"` BloFin error code (e.g. rate-limit `50011`) so `_call_with_retries` retries the full fetch instead of silently accepting a partial result.
-- fix: `get_candles` uses `resp.get("data") or []` to correctly handle `data=null` JSON responses.
-
-## 1.7.37
-- fix: apply after parameter fix to trading-bot/backend/exchange.py to unblock Collecting candles (100/200)
-- Initial plan
+## 2.0.0
+- refactor: consolidate to Home Assistant addon only, remove desktop app
 
 ## 1.7.36
 - fix: actually apply `_bar_to_ms` helper and `after` parameter to `history-candles` in `trading-bot/backend/exchange.py`; previous fixes (1.7.34, 1.7.35) only updated the root `backend/exchange.py` copy, leaving the deployed bot still stuck at "Collecting candles (100/200)"
