@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.2
+- chore: update version after merge [PATCH]
+- fix: correct CHANGELOG entry and improve hook portability [PATCH]
+- refactor: consolidate to Home Assistant addon only, remove desktop app [MAJOR]
+
 ## 2.0.1
 - merge: resolve conflicts with origin/main - keep consolidated structure [PATCH]
 
