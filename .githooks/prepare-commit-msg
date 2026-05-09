@@ -62,15 +62,20 @@ esac
 
 NEW_VERSION="$MAJOR.$MINOR.$PATCH"
 
-# Update config.json
-sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$NEW_VERSION\"/" "$CONFIG_FILE"
+# Update config.json using a temporary file
+sed "s/\"version\": \"[^\"]*\"/\"version\": \"$NEW_VERSION\"/" "$CONFIG_FILE" > "$CONFIG_FILE.tmp"
+mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 
-# Add entry to CHANGELOG.md (insert after "# Changelog" line)
-CHANGELOG_ENTRY="## $NEW_VERSION
-- $COMMIT_MSG"
-
-# Insert after the first line (# Changelog)
-sed -i "2i\\$CHANGELOG_ENTRY\n" "$CHANGELOG_FILE"
+# Add entry to CHANGELOG.md
+TEMP_CHANGELOG=$(mktemp)
+{
+    head -2 "$CHANGELOG_FILE"
+    echo "## $NEW_VERSION"
+    echo "- $COMMIT_MSG"
+    echo ""
+    tail -n +3 "$CHANGELOG_FILE"
+} > "$TEMP_CHANGELOG"
+mv "$TEMP_CHANGELOG" "$CHANGELOG_FILE"
 
 # Stage the updated files
 git add "$CONFIG_FILE" "$CHANGELOG_FILE"
