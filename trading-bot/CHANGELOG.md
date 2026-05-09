@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.0.1
+- merge: resolve conflicts with origin/main - keep consolidated structure [PATCH]
+
 ## 2.0.0
 - refactor: consolidate to Home Assistant addon only, remove desktop app
 
