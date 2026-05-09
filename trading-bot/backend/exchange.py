@@ -125,9 +125,15 @@ class BloFinClient:
 
         The ``history-candles`` endpoint requires **both** ``before`` and
         ``after`` query parameters – omitting ``after`` causes BloFin to return
-        an empty result set even when data exists.  ``after`` is computed as
-        ``before_ts - (batch_size × bar_ms × 2)`` to give a 2× safety window
-        that accommodates minor gaps in market data.
+        an empty result set even when data exists.  ``after`` is set once to a
+        fixed lower bound (``limit × bar_ms × 2`` before now) and reused on
+        every page so the window never narrows as the cursor advances.  This
+        mirrors the proven pattern used in ``backtest/fetch_data.py``.
+
+        BloFin may return HTTP 200 with a non-zero error code in the JSON body
+        (e.g. rate-limit code ``50011``).  This method raises ``RuntimeError``
+        on any non-``"0"`` code so that ``_call_with_retries`` can retry the
+        full fetch instead of silently returning a partial result.
 
         Returns list of [ts, open, high, low, close, vol, volCcy].
         """
@@ -137,6 +143,13 @@ class BloFinClient:
         all_candles: list[list] = []
         remaining = limit
         bar_ms = self._bar_to_ms(bar)
+
+        # Fixed lower bound: far enough back to cover *limit* candles with a
+        # 2× buffer.  Passed as the constant ``after`` parameter on every
+        # history-candles page — never updated as the cursor advances.
+        # This is the same approach used in backtest/fetch_data.py.
+        now_ms = int(time.time() * 1000)
+        start_ms = now_ms - limit * bar_ms * 2
 
         def _oldest_ts(batch: list[list]) -> int | None:
             try:
@@ -151,7 +164,19 @@ class BloFinClient:
             "bar": bar,
             "limit": first_batch_size,
         }
-        first_batch = self._get(live_path, first_params).get("data", [])
+        first_resp = self._get(live_path, first_params)
+        # Check for non-zero error codes on the live endpoint, consistent with
+        # the history endpoint check below.  A rate-limit or auth error on the
+        # live endpoint (e.g. code "50011") must raise so _call_with_retries
+        # can retry the full fetch instead of silently falling back to history
+        # with partial data.
+        live_api_code = first_resp.get("code", "0")
+        if live_api_code != "0":
+            raise RuntimeError(
+                f"live-candles API error: code={live_api_code} "
+                f"msg={first_resp.get('msg', '')}"
+            )
+        first_batch = first_resp.get("data") or []
         if first_batch:
             all_candles.extend(first_batch)
             remaining -= len(first_batch)
@@ -165,25 +190,33 @@ class BloFinClient:
                 return all_candles
         else:
             # Fall back to history pagination if the live endpoint is empty.
-            before_ts = int(time.time() * 1000)
+            before_ts = now_ms
 
         while remaining > 0:
             batch_size = min(remaining, BLOFIN_MAX)
-            # BloFin history-candles requires BOTH ``before`` and ``after`` to
-            # return results.  Without ``after`` the endpoint returns an empty
-            # list even when historical data is available.  Use a 2× safety
-            # window so minor data gaps do not cause the page to come up short.
-            after_ts = before_ts - (batch_size * bar_ms * 2)
             params: dict[str, Any] = {
                 "instId": symbol,
                 "bar": bar,
                 "limit": batch_size,
-                # Return candles with timestamp strictly older than before_ts
+                # Return candles with timestamp strictly older than before_ts.
                 "before": str(before_ts),
-                "after": str(after_ts),
+                # Fixed lower bound: do NOT narrow this on each page.
+                # A rolling after_ts causes BloFin to return empty pages when
+                # the cursor advances past the rolling window boundary.
+                "after": str(start_ms),
             }
 
-            batch = self._get(history_path, params).get("data", [])
+            resp = self._get(history_path, params)
+            # BloFin may return HTTP 200 with a non-zero error code (e.g. rate
+            # limit: code "50011").  Raise so _call_with_retries retries the
+            # full fetch rather than silently accepting a partial result.
+            api_code = resp.get("code", "0")
+            if api_code != "0":
+                raise RuntimeError(
+                    f"history-candles API error: code={api_code} "
+                    f"msg={resp.get('msg', '')}"
+                )
+            batch = resp.get("data") or []
             if not batch:
                 break
 
